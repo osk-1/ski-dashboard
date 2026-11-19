@@ -21,7 +21,7 @@ STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc6
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
-TAWES = {"11311": ("St. Anton (Tal)", 1304), "11110": ("Galzig", 2079)}  # GeoSphere TAWES id: (name, altitude m)
+TAWES = {"11311": ("St. Anton (Tal)", 1304, "snow"), "11110": ("Galzig", 2079, "wind")}  # GeoSphere TAWES id: (name, altitude m, type)
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
 
 
@@ -74,7 +74,7 @@ def parse_tawes(gj, names):
         v = lambda k: next((x for x in reversed(p.get(k, {}).get("data") or []) if x is not None), None)  # staggered: newest non-null
         kmh = lambda x: None if x is None else num(x * 3.6)
         out.append({"id": "TAWES-" + id, "uuid": "TAWES-" + id, "name": names[id][0], "region": None,
-                    "type": "wind" if v("SCHNEE") is None else "snow", "lon": round(f["geometry"]["coordinates"][0], 5),
+                    "type": names[id][2], "lon": round(f["geometry"]["coordinates"][0], 5),
                     "lat": round(f["geometry"]["coordinates"][1], 5), "alt": names[id][1], "hs": depth(v("SCHNEE")), "n24": None,
                     "hsd24": None, "lt": num(v("TL")), "wg": kmh(v("FF")), "wg_boe": kmh(v("FFX")), "wr": num(v("DD")),
                     "date": gj["timestamps"][-1]})
@@ -206,12 +206,14 @@ def main(days):
             print("skip", s.isoformat(), e, file=sys.stderr)
             continue
         hs = {by_uuid[f["id"]]: depth(f["properties"].get("HS")) for f in feats if f["id"] in by_uuid}
-        readings[s.strftime("%Y-%m-%dT%H")] = {"t": s.isoformat(), "hs": hs}
+        slot = readings.setdefault(s.strftime("%Y-%m-%dT%H"), {"hs": {}})
+        slot["t"] = s.isoformat()
+        slot["hs"].update(hs)  # merge: keep other sources' ids (TAWES)
     try:  # TAWES snow height at the slot times, one historical request
         sl = slots(days, now)
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
         gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE&station_ids=" + ",".join(
-            i for i in TAWES if "TAWES-" + i in by_uuid.values()) + f"&start={u(sl[0])}&end={u(now)}")
+            i for i, v in TAWES.items() if v[2] == "snow") + f"&start={u(sl[0])}&end={u(now)}")
         iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
         for k, hs in tawes_history(gj, list(iso)).items():
             readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"].update(hs)
