@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Arlberg Snow Depth</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
 <style>
 /* Layout: summary strip, then map beside the station list, then history + forecast for the selected station. */
@@ -20,7 +24,8 @@
   --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
   --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
   color-scheme: dark }
-body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+[hidden] { display: none !important; }
 .wrap { max-width: 1180px; margin: 0 auto; padding-block: 20px 40px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   display: grid; gap: 18px; }
@@ -56,6 +61,8 @@ tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 .src { color: var(--muted); font-size: .78rem; }
 a { color: var(--accent); }
 </style>
+</head>
+<body>
 
 <div class="wrap">
   <header>
@@ -70,7 +77,7 @@ a { color: var(--accent); }
   <div class="grid2">
     <section class="panel">
       <h2>Stations</h2>
-      <div id="map"><div class="empty">The map appears once the first data run has been recorded.</div></div>
+      <div id="map"><div class="empty">Loading map…</div></div>
       <div class="legend" id="legend"></div>
     </section>
     <section class="panel">
@@ -78,7 +85,7 @@ a { color: var(--accent); }
       <div class="tablebox">
         <table>
           <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="4" class="empty">No readings yet. Data is recorded at 07:00, 12:00 and 17:00.</td></tr></tbody>
+          <tbody id="rows"><tr><td colspan="4" class="empty">Loading readings…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -253,22 +260,19 @@ new MutationObserver(renderAll).observe(document.documentElement, { attributes: 
 
 (async () => {
   const note = document.getElementById("updated");
-  const timer = setTimeout(() => { note.textContent = "Station data is taking longer than usual to load. Reopen the page to try again."; }, 10000);
-  const db = await window.claude?.use?.("db");
-  if (!db) { clearTimeout(timer); note.textContent = "Sign in to claude.ai to see the recorded station data."; return; }
-  db.doc("meta/stations").onSnapshot(snap => {
-    clearTimeout(timer);
-    const d = snap.data();
-    if (!d) { note.textContent = "No data recorded yet. The first run fills this page."; return; }
-    state.stations = d.stations || [];
+  const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  try {
+    const [st, fc, rd] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({}))]);
+    state.stations = st.stations || [];
+    state.forecast = fc;
+    state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
     if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
-    note.textContent = `Updated ${fmtSlot(d.updated)} · ${state.stations.length} stations`;
+    note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;
     renderAll();
-  }, () => { clearTimeout(timer); note.textContent = "Couldn't load station data. Reopen the page to try again."; });
-  db.doc("forecast/latest").onSnapshot(snap => { state.forecast = snap.data() || null; renderSummary(); renderCharts(); });
-  db.collection("readings").orderBy("t").limit(1000).onSnapshot(snap => {
-    state.readings = snap.docs.map(d => d.data());
-    renderSummary(); renderTable(); renderCharts();
-  });
+  } catch {
+    note.textContent = "Couldn't load station data. Reload the page to try again.";
+  }
 })();
 </script>
+</body>
+</html>

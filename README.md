@@ -3,18 +3,18 @@
 Snow height at the Lawinenwarndienst Tirol weather stations around St. Anton / Rendl,
 with history and a 5-day snowfall forecast.
 
-Live page (private claude.ai artifact): https://claude.ai/artifact/DYQWzaKaoTBmZEWfnZs714
+Live page: https://osk-1.github.io/ski-dashboard/
 
 ## How it works
 
-Artifact pages can't call outside APIs from the browser, so data flows through the artifact's database:
+1. A GitHub Actions workflow (`.github/workflows/fetch.yml`) runs `fetch.py` at about 07:10, 12:10 and
+   17:10 Vienna time (GitHub can delay scheduled runs by 10–30 min) and commits the results in `data/`:
+   - `stations.json`: current snow height (HS) per station
+   - `forecast.json`: 5-day snowfall and min/max temperature per station
+   - `readings.json`: HS per station at every 07/12/17 slot (the history)
+2. GitHub Pages serves `index.html`, which reads those three files.
 
-1. A scheduled Claude Code task runs at 07:10, 12:10 and 17:10 (Vienna) and runs `fetch.py` (setup: [SCHEDULE.md](SCHEDULE.md)).
-2. `fetch.py` writes JSON docs into `out/`:
-   - `stations.json` → db `meta/stations` (current HS per station)
-   - `forecast.json` → db `forecast/latest` (5-day snowfall, min/max temp)
-   - `readings/<YYYY-MM-DDTHH>.json` → db `readings/<slot>` (HS per station at 07/12/17)
-3. The task writes those docs into the artifact database; `index.html` renders them.
+To record now: Actions tab → "Record snow data" → Run workflow.
 
 ## Data sources
 

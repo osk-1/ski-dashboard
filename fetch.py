@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fetch Arlberg snow data into JSON docs for the artifact database.
+"""Fetch Arlberg snow data into ./data/ for the dashboard (run by GitHub Actions).
 
-Writes into ./out/:
-  stations.json          -> db doc meta/stations
-  forecast.json          -> db doc forecast/latest
-  readings/<slot>.json   -> db doc readings/<slot>   (slot = local "YYYY-MM-DDTHH", hours 07/12/17)
+Writes:
+  data/stations.json   current snow height per station
+  data/forecast.json   5-day snowfall and min/max temperature per station
+  data/readings.json   {slot: {t, hs}} history; slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, never pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
@@ -129,7 +129,12 @@ def main(days):
     } for f in live]
     by_uuid = {s["uuid"]: s["id"] for s in stations}
 
-    os.makedirs("out/readings", exist_ok=True)
+    os.makedirs("data", exist_ok=True)
+    try:
+        with open("data/readings.json") as fh:
+            readings = json.load(fh)
+    except FileNotFoundError:
+        readings = {}
     for s in slots(days, now):
         try:
             feats = get_json(snapshot_url(s))["features"]
@@ -137,17 +142,17 @@ def main(days):
             print("skip", s.isoformat(), e, file=sys.stderr)
             continue
         hs = {by_uuid[f["id"]]: depth(f["properties"].get("HS")) for f in feats if f["id"] in by_uuid}
-        doc = {"t": s.isoformat(), "hs": hs}
-        with open(f"out/readings/{s.strftime('%Y-%m-%dT%H')}.json", "w") as fh:
-            json.dump(doc, fh)
+        readings[s.strftime("%Y-%m-%dT%H")] = {"t": s.isoformat(), "hs": hs}
+    with open("data/readings.json", "w") as fh:
+        json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
 
-    with open("out/stations.json", "w") as fh:
+    with open("data/stations.json", "w") as fh:
         json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
     fc = forecast(stations)
     fc["generated"] = now.isoformat(timespec="minutes")
-    with open("out/forecast.json", "w") as fh:
+    with open("data/forecast.json", "w") as fh:
         json.dump(fc, fh)
-    print(f"{len(stations)} stations, {len(os.listdir('out/readings'))} reading files, forecast: {fc['source']}")
+    print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fc['source']}")
 
 
 def selftest():

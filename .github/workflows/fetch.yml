@@ -1,0 +1,32 @@
+name: Record snow data
+
+on:
+  schedule:
+    # GitHub cron is UTC only. 07:10/12:10/17:10 Vienna = 06/11/16 UTC in winter, 05/10/15 UTC in summer.
+    # Running both sets is harmless: fetch.py only fills slots that have passed and overwrites them idempotently.
+    - cron: "10 5,6,10,11,15,16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: fetch
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 fetch.py --selftest
+      # --days 2 refills yesterday's slots too, in case a run was skipped
+      - run: python3 fetch.py --days 2
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || git commit -m "Record snow data $(TZ=Europe/Vienna date '+%Y-%m-%d %H:%M')"
+          git push
