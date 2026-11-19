@@ -47,6 +47,12 @@ svg.map { width: 100%; height: auto; display: block; }
 .legend svg { vertical-align: middle; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .tablebox { overflow-x: auto; }
+summary { list-style: none; display: flex; align-items: center; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+summary h2 { margin: 0; }
+summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
+details:not([open]) summary::after { transform: rotate(-90deg); }
+details[open] > summary { margin-bottom: 10px; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { text-align: left; font-weight: 500; color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 td { padding: 8px; border-bottom: 1px solid var(--line); }
@@ -82,13 +88,15 @@ a { color: var(--accent); }
       <div class="legend" id="legend"></div>
     </section>
     <section class="panel">
-      <h2>Snow height (HS)</h2>
-      <div class="tablebox">
-        <table>
-          <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th><th class="n">Wind</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="5" class="empty">Loading readings…</td></tr></tbody>
-        </table>
-      </div>
+      <details id="tableDetails">
+        <summary><h2>Snow height (HS)</h2></summary>
+        <div class="tablebox">
+          <table>
+            <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th><th class="n">Wind</th></tr></thead>
+            <tbody id="rows"><tr><td colspan="5" class="empty">Loading readings…</td></tr></tbody>
+          </table>
+        </div>
+      </details>
     </section>
   </div>
 
@@ -268,6 +276,16 @@ for (const ev of ["click", "keydown"]) document.addEventListener(ev, e => {
   if (ev === "keydown" && e.key !== "Enter" && e.key !== " ") return;
   const el = e.target.closest("[data-id]");
   if (el) { e.preventDefault(); select(el.dataset.id); }
+});
+const tableDetails = document.getElementById("tableDetails");
+let savedOpen = null;
+try { savedOpen = localStorage.getItem("tableOpen"); } catch {}
+const tableShown = () => savedOpen == null ? matchMedia("(min-width: 821px)").matches : savedOpen === "1";
+tableDetails.open = tableShown();
+tableDetails.addEventListener("toggle", () => {
+  if (tableDetails.open === tableShown()) return; // our own initial set, not a user toggle
+  savedOpen = tableDetails.open ? "1" : "0";
+  try { localStorage.setItem("tableOpen", savedOpen); } catch {}
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
 new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
