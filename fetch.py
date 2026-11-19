@@ -20,6 +20,8 @@ STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc6
             "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
 LWD = "https://static.avalanche.report/weather_stations/"
+GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
+TAWES = {"11311": ("St. Anton (Tal)", 1304), "11110": ("Galzig", 2079)}  # GeoSphere TAWES id: (name, altitude m)
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
 
 
@@ -62,6 +64,34 @@ def station(f):
         "wr": num(p.get("WR")),
         "date": p.get("date"),
     }
+
+
+def parse_tawes(gj, names):
+    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h; SCHNEE null = wind-only."""
+    out = []
+    for f in gj["features"]:
+        p, id = f["properties"]["parameters"], f["properties"]["station"]
+        v = lambda k: next((x for x in reversed(p.get(k, {}).get("data") or []) if x is not None), None)  # staggered: newest non-null
+        kmh = lambda x: None if x is None else num(x * 3.6)
+        out.append({"id": "TAWES-" + id, "uuid": "TAWES-" + id, "name": names[id][0], "region": None,
+                    "type": "wind" if v("SCHNEE") is None else "snow", "lon": round(f["geometry"]["coordinates"][0], 5),
+                    "lat": round(f["geometry"]["coordinates"][1], 5), "alt": names[id][1], "hs": depth(v("SCHNEE")), "n24": None,
+                    "hsd24": None, "lt": num(v("TL")), "wg": kmh(v("FF")), "wg_boe": kmh(v("FFX")), "wr": num(v("DD")),
+                    "date": gj["timestamps"][-1]})
+    return out
+
+
+def tawes_history(gj, slot_keys):
+    """{local slot key: {TAWES-id: cm}} from a historical geojson (UTC 10-min timestamps), snow stations only."""
+    ts = [datetime.fromisoformat(t).astimezone(TZ).strftime("%Y-%m-%dT%H:%M") for t in gj["timestamps"]]
+    out = {}
+    for f in gj["features"]:
+        d = f["properties"]["parameters"]["SCHNEE"]["data"]
+        for k in slot_keys:
+            i = ts.index(k + ":00") if k + ":00" in ts else None
+            if i is not None and d[i] is not None:
+                out.setdefault(k, {})["TAWES-" + f["properties"]["station"]] = depth(d[i])
+    return out
 
 
 def slots(days, now):
@@ -156,6 +186,11 @@ def main(days):
     stations = [station(f) for f in get_json(LWD + "stations.geojson")["features"] if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
     for m in set(STATIONS) - {x["id"] for x in stations}:
         print("station missing from feed:", m, file=sys.stderr)
+    try:  # secondary source: a failure must not abort the run
+        q = "tawes-v1-10min?parameters=SCHNEE,TL,FF,FFX,DD&station_ids=" + ",".join(TAWES)
+        stations += parse_tawes(get_json(GEO + "current/" + q), TAWES)
+    except Exception as e:
+        print("GeoSphere TAWES failed:", e, file=sys.stderr)
     by_uuid = {s["uuid"]: s["id"] for s in stations if s["type"] == "snow"}
 
     os.makedirs("data", exist_ok=True)
@@ -172,6 +207,16 @@ def main(days):
             continue
         hs = {by_uuid[f["id"]]: depth(f["properties"].get("HS")) for f in feats if f["id"] in by_uuid}
         readings[s.strftime("%Y-%m-%dT%H")] = {"t": s.isoformat(), "hs": hs}
+    try:  # TAWES snow height at the slot times, one historical request
+        sl = slots(days, now)
+        u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE&station_ids=" + ",".join(
+            i for i in TAWES if "TAWES-" + i in by_uuid.values()) + f"&start={u(sl[0])}&end={u(now)}")
+        iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
+        for k, hs in tawes_history(gj, list(iso)).items():
+            readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"].update(hs)
+    except Exception as e:
+        print("TAWES history failed:", e, file=sys.stderr)
     with open("data/readings.json", "w") as fh:
         json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
 
@@ -216,6 +261,15 @@ def selftest():
     d = parse_danger(bl, {"AT-07-07"})
     assert list(d) == ["AT-07-07"] and d["AT-07-07"]["valid_end"] == "e" and d["AT-07-07"]["problems"][0]["type"] == "wet_snow"
     assert [(r["level"], r["bound"], r["elevation"]) for r in d["AT-07-07"]["ratings"]] == [(1, "below", "2600"), (3, "above", "2600"), (0, None, None)]
+    gj = {"timestamps": ["2026-11-19T05:50+00:00", "2026-11-19T06:00+00:00"], "features": [
+        {"geometry": {"coordinates": [10.23, 47.13]}, "properties": {"station": "11110", "parameters": {
+            "SCHNEE": {"data": [None, None]}, "TL": {"data": [-1, -2.1]}, "FF": {"data": [1, 5.5]}, "FFX": {"data": [2, 9.6]}, "DD": {"data": [1, 273.0]}}}},
+        {"geometry": {"coordinates": [10.27, 47.13]}, "properties": {"station": "11311", "parameters": {
+            "SCHNEE": {"data": [7.0, 0.0]}, "TL": {"data": [1, 2.9]}, "FF": {"data": [0.2, None]}, "FFX": {"data": [2, 1.9]}, "DD": {"data": [1, 226.0]}}}}]}
+    g, a = parse_tawes(gj, TAWES)
+    assert (g["id"], g["type"], g["hs"], g["wg"], g["wg_boe"], g["wr"], g["lt"], g["alt"]) == ("TAWES-11110", "wind", None, 19.8, 34.6, 273.0, -2.1, 2079)
+    assert (a["type"], a["hs"], a["wg"]) == ("snow", 0.0, 0.7)
+    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {"2026-11-19T07": {"TAWES-11311": 0.0}}  # 06:00 UTC = 07:00 CET; Galzig has no snow
     print("selftest ok")
 
 

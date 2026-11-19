@@ -32,6 +32,7 @@ Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`w
 |---|---|
 | Stations, snow height (HS) | `https://static.avalanche.report/weather_stations/stations.geojson` |
 | History | hourly archive `https://static.avalanche.report/weather_stations/<UTC YYYY-MM-DD_HH>-00_stations.geojson` |
+| St. Anton valley (TAWES 11311, snow + wind) and Galzig (TAWES 11110, wind/temperature only, no snow gauge) | GeoSphere Austria Data Hub `https://dataset.api.hub.geosphere.at/v1/station/{current,historical}/tawes-v1-10min` (CC BY 4.0); ids `TAWES-<id>`, m/s converted to km/h; snow history of the slots comes from the historical endpoint |
 | Avalanche danger | Euregio CAAMLv6 bulletin `https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json` |
 | Forecast | Open-Meteo (free tier). Falls back to MET Norway when Open-Meteo's shared daily quota is exhausted |
 
