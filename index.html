@@ -1,0 +1,274 @@
+<title>Arlberg Snow Depth</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: summary strip, then map beside the station list, then history + forecast for the selected station. */
+:root {
+  --bg: #f4f7fa; --panel: #ffffff; --fg: #142030; --muted: #5b6b7d; --line: #d8e0e8;
+  --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c;
+  --snow-0: #e6eef8; --snow-1: #b9d0ee; --snow-2: #7fa9de; --snow-3: #3f7cc8; --snow-4: #1a4f9c;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
+  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
+  --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
+  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
+  --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
+  color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+h1 { font: 700 2rem/1.1 var(--display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02em; text-transform: uppercase; }
+.meta { color: var(--muted); font-size: .85rem; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 820px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.strip { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.stat b { display: block; font: 600 1.7rem/1 var(--display); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+svg.map { width: 100%; height: auto; display: block; }
+.map text { font-family: var(--body); }
+.map .stn { cursor: pointer; }
+.map .stn:focus-visible circle { stroke: var(--fg); stroke-width: 3; }
+.legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
+.legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
+.tablebox { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 8px; border-bottom: 1px solid var(--line); }
+td.n, th.n { text-align: right; white-space: nowrap; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--accent-soft); }
+tbody tr[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.up { color: var(--accent); font-weight: 600; }
+.chartbox { position: relative; height: 260px; }
+.fcdays { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 10px; text-align: center; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.empty { color: var(--muted); padding: 30px 0; text-align: center; }
+.src { color: var(--muted); font-size: .78rem; }
+a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Arlberg Snow Depth</h1>
+    <div class="meta" id="updated">Loading station data…</div>
+  </header>
+
+  <section class="panel strip" id="summary" aria-label="Summary">
+    <div class="stat"><b>–</b><span>Deepest station</span></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Stations</h2>
+      <div id="map"><div class="empty">The map appears once the first data run has been recorded.</div></div>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section class="panel">
+      <h2>Snow height (HS)</h2>
+      <div class="tablebox">
+        <table>
+          <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="4" class="empty">No readings yet. Data is recorded at 07:00, 12:00 and 17:00.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2 id="histTitle">History</h2>
+      <div class="chartbox"><canvas id="hist" aria-label="Snow height history chart"></canvas></div>
+      <p class="src" id="histNote"></p>
+    </section>
+    <section class="panel">
+      <h2 id="fcTitle">5-day snowfall forecast</h2>
+      <div class="chartbox"><canvas id="fc" aria-label="Snowfall forecast chart"></canvas></div>
+      <div class="fcdays" id="fcTemps"></div>
+      <p class="src" id="fcSource"></p>
+    </section>
+  </div>
+
+  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const BOUNDS = { lon0: 10.17, lon1: 10.43, lat0: 47.003, lat1: 47.168 };
+const KX = Math.cos(47.1 * Math.PI / 180);
+const W = 800, H = Math.round(W * (BOUNDS.lat1 - BOUNDS.lat0) / ((BOUNDS.lon1 - BOUNDS.lon0) * KX));
+const xy = (lon, lat) => [(lon - BOUNDS.lon0) / (BOUNDS.lon1 - BOUNDS.lon0) * W, (BOUNDS.lat1 - lat) / (BOUNDS.lat1 - BOUNDS.lat0) * H];
+const PLACES = [["St. Anton", 10.2636, 47.1295], ["St. Christoph", 10.1953, 47.1317], ["Pettneu", 10.3428, 47.1453],
+  ["Ischgl", 10.2921, 47.0125]];
+const PEAKS = [["Valluga 2811", 10.2125, 47.1575]];
+const STEPS = [10, 25, 50, 100]; // cm bands for the sequential scale
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const band = hs => hs == null ? -1 : STEPS.filter(s => hs >= s).length;
+const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let state = { stations: [], readings: [], forecast: null, selected: null };
+let charts = {};
+try { state.selected = localStorage.getItem("sel"); } catch {}
+
+function delta24(id) {
+  const r = state.readings; if (r.length < 2) return null;
+  const last = r[r.length - 1], cutoff = new Date(last.t) - 24 * 3600e3;
+  const prev = [...r].reverse().find(x => new Date(x.t) <= cutoff);
+  const a = last.hs[id], b = prev?.hs[id];
+  return a == null || b == null ? null : Math.round(a - b);
+}
+
+function renderSummary() {
+  const s = state.stations.filter(x => x.hs != null);
+  if (!s.length) return;
+  const deep = s.reduce((a, b) => b.hs > a.hs ? b : a);
+  const avg = s.reduce((a, b) => a + b.hs, 0) / s.length;
+  const ds = s.map(x => delta24(x.id)).filter(x => x != null);
+  const dAvg = ds.length ? Math.round(ds.reduce((a, b) => a + b, 0) / ds.length) : null;
+  const fc = state.forecast?.points?.[deep.id]?.snowfall;
+  const fcSum = fc ? Math.round(fc.reduce((a, b) => a + (b || 0), 0)) : null;
+  document.getElementById("summary").innerHTML = [
+    [`${Math.round(deep.hs)} cm`, `Deepest · ${esc(deep.name)}`],
+    [`${Math.round(avg)} cm`, `Average of ${s.length} stations`],
+    [dAvg == null ? "–" : `${dAvg > 0 ? "+" : ""}${dAvg} cm`, "Avg change 24 h"],
+    [fcSum == null ? "–" : `${fcSum} cm`, "New snow next 5 days"],
+  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+}
+
+function renderMap() {
+  if (!state.stations.length) return;
+  const snow = i => i < 0 ? css("--line") : css(`--snow-${i}`);
+  const placed = []; // label boxes, so stations near a village or each other put their label on the other side
+  let g = `<rect width="${W}" height="${H}" rx="8" fill="${css("--land")}"/>`;
+  for (const [n, lon, lat] of PLACES) {
+    const [x, y] = xy(lon, lat);
+    placed.push([x - 6, y - 12, x + 12 + n.length * 10, y + 8]);
+    g += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8" fill="${css("--village")}"/><text x="${x + 9}" y="${y + 5}" font-size="18" fill="${css("--village")}" font-weight="600">${n}</text>`;
+  }
+  for (const [n, lon, lat] of PEAKS) {
+    const [x, y] = xy(lon, lat);
+    g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/><text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
+  }
+  for (const s of [...state.stations].sort((a, b) => b.lat - a.lat)) {
+    const [x, y] = xy(s.lon, s.lat), sel = s.id === state.selected, b = band(s.hs);
+    const box = left => [left ? x - 190 : x + 14, y - 20, left ? x - 14 : x + 190, y + 26];
+    const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
+    const left = hit(box(false)) && !hit(box(true)) || x > W - 170;
+    placed.push(box(left));
+    const tx = left ? x - 18 : x + 18, anchor = left ? "end" : "start";
+    g += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${s.hs ?? "no"} cm">
+      <title>${esc(s.name)} · ${s.alt} m · ${s.hs ?? "–"} cm</title>
+      <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${snow(b)}" stroke="${sel ? css("--fg") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
+      <text x="${tx}" y="${y - 2}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
+      <text x="${tx}" y="${y + 22}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</text></g>`;
+  }
+  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}</svg>`;
+  document.getElementById("legend").innerHTML = "Snow height: " +
+    ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ");
+}
+
+function renderTable() {
+  if (!state.stations.length) return;
+  const rows = [...state.stations].sort((a, b) => b.alt - a.alt);
+  document.getElementById("rows").innerHTML = rows.map(s => {
+    const d = delta24(s.id);
+    return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
+      <td>${esc(s.name)}</td><td class="n">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</b></td>
+      <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td></tr>`;
+  }).join("");
+}
+
+function chartDefaults() {
+  Chart.defaults.color = css("--muted");
+  Chart.defaults.borderColor = css("--line");
+  Chart.defaults.font.family = css("--body");
+}
+
+function renderCharts() {
+  const s = state.stations.find(x => x.id === state.selected);
+  if (!s || typeof Chart === "undefined") return;
+  chartDefaults();
+  const accent = css("--accent"), soft = css("--accent-soft");
+  const hist = state.readings.map(r => ({ x: fmtSlot(r.t), y: r.hs[s.id] ?? null }));
+  const fp = state.forecast?.points?.[s.id];
+  const days = state.forecast?.days || [];
+  const dayLabel = d => new Date(d + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
+  const proj = fp?.depth ? days.map((d, i) => ({ x: dayLabel(d) + " (fc)", y: fp.depth[i] })) : [];
+  const labels = [...hist.map(p => p.x), ...proj.map(p => p.x)];
+
+  document.getElementById("histTitle").textContent = `History · ${s.name}`;
+  document.getElementById("histNote").textContent = hist.length
+    ? `${hist.length} readings since ${hist[0].x}.` + (proj.length ? " Dashed line: modelled snow depth forecast." : "")
+    : "No history recorded yet.";
+  charts.hist?.destroy();
+  charts.hist = new Chart(document.getElementById("hist"), {
+    type: "line",
+    data: { labels, datasets: [
+      { label: "Measured HS (cm)", data: hist.map(p => p.y), borderColor: accent, backgroundColor: soft, fill: "origin", borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, spanGaps: true, tension: .25 },
+      ...(proj.length ? [{ label: "Forecast depth (cm)", data: [...hist.map(() => null), ...proj.map(p => p.y)], borderColor: accent, borderDash: [5, 4], borderWidth: 2, pointRadius: 4, fill: false }] : []),
+    ] },
+    options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: proj.length > 0 } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } }, y: { beginAtZero: true, title: { display: true, text: "cm" } } } },
+  });
+
+  document.getElementById("fcTitle").textContent = `5-day snowfall · ${s.name}`;
+  charts.fc?.destroy();
+  if (!fp) { document.getElementById("fcSource").textContent = "No forecast stored yet."; return; }
+  charts.fc = new Chart(document.getElementById("fc"), {
+    type: "bar",
+    data: { labels: days.map(dayLabel), datasets: [{ label: "New snow (cm)", data: fp.snowfall, backgroundColor: accent, borderRadius: 4, maxBarThickness: 44 }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y ?? 0} cm new snow` } } },
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, title: { display: true, text: "cm" } } } },
+  });
+  document.getElementById("fcTemps").innerHTML = days.map((d, i) =>
+    `<div>${fp.tmin[i] == null ? "–" : Math.round(fp.tmin[i])}° / ${fp.tmax[i] == null ? "–" : Math.round(fp.tmax[i])}°</div>`).join("");
+  document.getElementById("fcSource").textContent = `Min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
+}
+
+function renderAll() { renderSummary(); renderMap(); renderTable(); renderCharts(); }
+
+function select(id) {
+  state.selected = id;
+  try { localStorage.setItem("sel", id); } catch {}
+  renderMap(); renderTable(); renderCharts();
+}
+for (const ev of ["click", "keydown"]) document.addEventListener(ev, e => {
+  if (ev === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+  const el = e.target.closest("[data-id]");
+  if (el) { e.preventDefault(); select(el.dataset.id); }
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+(async () => {
+  const note = document.getElementById("updated");
+  const timer = setTimeout(() => { note.textContent = "Station data is taking longer than usual to load. Reopen the page to try again."; }, 10000);
+  const db = await window.claude?.use?.("db");
+  if (!db) { clearTimeout(timer); note.textContent = "Sign in to claude.ai to see the recorded station data."; return; }
+  db.doc("meta/stations").onSnapshot(snap => {
+    clearTimeout(timer);
+    const d = snap.data();
+    if (!d) { note.textContent = "No data recorded yet. The first run fills this page."; return; }
+    state.stations = d.stations || [];
+    if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
+    note.textContent = `Updated ${fmtSlot(d.updated)} · ${state.stations.length} stations`;
+    renderAll();
+  }, () => { clearTimeout(timer); note.textContent = "Couldn't load station data. Reopen the page to try again."; });
+  db.doc("forecast/latest").onSnapshot(snap => { state.forecast = snap.data() || null; renderSummary(); renderCharts(); });
+  db.collection("readings").orderBy("t").limit(1000).onSnapshot(snap => {
+    state.readings = snap.docs.map(d => d.data());
+    renderSummary(); renderTable(); renderCharts();
+  });
+})();
+</script>
