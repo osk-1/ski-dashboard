@@ -9,19 +9,19 @@
 /* Layout: summary strip, then map beside the station list, then history + forecast for the selected station. */
 :root {
   --bg: #f4f7fa; --panel: #ffffff; --fg: #142030; --muted: #5b6b7d; --line: #d8e0e8;
-  --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c;
+  --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c; --wind: #c0561a; --relief-op: .38; --relief-blend: multiply; --relief-filter: none;
   --snow-0: #e6eef8; --snow-1: #b9d0ee; --snow-2: #7fa9de; --snow-3: #3f7cc8; --snow-4: #1a4f9c;
   --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
-  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
+  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873; --wind: #f0a060; --relief-op: .35; --relief-blend: screen; --relief-filter: invert(1);
   --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
   color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
-  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
+  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873; --wind: #f0a060; --relief-op: .35; --relief-blend: screen; --relief-filter: invert(1);
   --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
   color-scheme: dark }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
@@ -40,12 +40,21 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 .stat b { display: block; font: 600 1.7rem/1 var(--display); font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
 svg.map { width: 100%; height: auto; display: block; }
-.map text { font-family: var(--body); }
+.map .relief { opacity: var(--relief-op); mix-blend-mode: var(--relief-blend); filter: var(--relief-filter); }
+.map text { font-family: var(--body); paint-order: stroke; stroke: var(--land); stroke-width: 3px; stroke-linejoin: round; }
+.map .lbl { cursor: pointer; }
 .map .stn { cursor: pointer; }
 .map .stn:focus-visible circle { stroke: var(--fg); stroke-width: 3; }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
+.legend svg { vertical-align: middle; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .tablebox { overflow-x: auto; }
+summary { list-style: none; display: flex; align-items: center; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+summary h2 { margin: 0; }
+summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
+details:not([open]) summary::after { transform: rotate(-90deg); }
+details[open] > summary { margin-bottom: 10px; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { text-align: left; font-weight: 500; color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 td { padding: 8px; border-bottom: 1px solid var(--line); }
@@ -60,6 +69,11 @@ tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 .src { color: var(--muted); font-size: .78rem; }
 a { color: var(--accent); }
+.dg { display: inline-block; padding: 0 8px; border-radius: 10px; border: 1px solid transparent; font-weight: 600; font-size: .85rem; white-space: nowrap; }
+.dg1 { background: #ccff66; color: #142030; } .dg2 { background: #ffff00; color: #142030; } .dg3 { background: #ff9900; color: #142030; }
+.dg4 { background: #ff0000; color: #fff; } .dg5 { background: #000; color: #ff0000; border-color: #ff0000; } .dg0 { background: #9aa5b1; color: #142030; }
+.old .dg { opacity: .45; }
+#danger { display: grid; gap: 6px; font-size: .9rem; } #danger div { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
 </style>
 </head>
 <body>
@@ -68,11 +82,14 @@ a { color: var(--accent); }
   <header>
     <h1>Arlberg Snow Depth</h1>
     <div class="meta" id="updated">Loading station data…</div>
+    <div class="meta" id="dangerChip" hidden></div>
   </header>
 
   <section class="panel strip" id="summary" aria-label="Summary">
     <div class="stat"><b>–</b><span>Deepest station</span></div>
   </section>
+
+  <section class="panel" id="danger" aria-label="Avalanche danger" hidden></section>
 
   <div class="grid2">
     <section class="panel">
@@ -81,13 +98,15 @@ a { color: var(--accent); }
       <div class="legend" id="legend"></div>
     </section>
     <section class="panel">
-      <h2>Snow height (HS)</h2>
-      <div class="tablebox">
-        <table>
-          <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="4" class="empty">Loading readings…</td></tr></tbody>
-        </table>
-      </div>
+      <details id="tableDetails">
+        <summary><h2>Snow height (HS)</h2></summary>
+        <div class="tablebox">
+          <table>
+            <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th><th class="n">Wind</th></tr></thead>
+            <tbody id="rows"><tr><td colspan="5" class="empty">Loading readings…</td></tr></tbody>
+          </table>
+        </div>
+      </details>
     </section>
   </div>
 
@@ -105,15 +124,26 @@ a { color: var(--accent); }
     </section>
   </div>
 
-  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
+  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Avalanche danger: Euregio bulletin (avalanche.report). St. Anton and Galzig: <a href="https://data.hub.geosphere.at" target="_blank" rel="noopener">GeoSphere Austria (CC BY 4.0)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 const BOUNDS = { lon0: 10.17, lon1: 10.43, lat0: 47.003, lat1: 47.168 };
-const KX = Math.cos(47.1 * Math.PI / 180);
-const W = 800, H = Math.round(W * (BOUNDS.lat1 - BOUNDS.lat0) / ((BOUNDS.lon1 - BOUNDS.lon0) * KX));
-const xy = (lon, lat) => [(lon - BOUNDS.lon0) / (BOUNDS.lon1 - BOUNDS.lon0) * W, (BOUNDS.lat1 - lat) / (BOUNDS.lat1 - BOUNDS.lat0) * H];
+const mer = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)); // Web Mercator y, so relief tiles line up
+const W = 800, H = Math.round(W * (mer(BOUNDS.lat1) - mer(BOUNDS.lat0)) / ((BOUNDS.lon1 - BOUNDS.lon0) * Math.PI / 180));
+const xy = (lon, lat) => [(lon - BOUNDS.lon0) / (BOUNDS.lon1 - BOUNDS.lon0) * W, (mer(BOUNDS.lat1) - mer(lat)) / (mer(BOUNDS.lat1) - mer(BOUNDS.lat0)) * H];
+const TZ = 13; // ~1.9 tile px per map unit
+function reliefTiles() { // Esri hillshade tiles covering BOUNDS, placed with xy()
+  const n = 2 ** TZ, tx = lon => (lon + 180) / 360 * n, ty = lat => (1 - mer(lat) / Math.PI) / 2 * n;
+  const lon = t => t / n * 360 - 180, lat = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
+  let out = "";
+  for (let y = Math.floor(ty(BOUNDS.lat1)); y <= Math.floor(ty(BOUNDS.lat0)); y++) for (let x = Math.floor(tx(BOUNDS.lon0)); x <= Math.floor(tx(BOUNDS.lon1)); x++) {
+    const [x0, y0] = xy(lon(x), lat(y)), [x1, y1] = xy(lon(x + 1), lat(y + 1));
+    out += `<image onerror="this.remove()" href="https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${TZ}/${y}/${x}" x="${x0.toFixed(2)}" y="${y0.toFixed(2)}" width="${(x1 - x0 + .5).toFixed(2)}" height="${(y1 - y0 + .5).toFixed(2)}"/>`;
+  }
+  return `<clipPath id="mapclip"><rect width="${W}" height="${H}" rx="8"/></clipPath><g class="relief" clip-path="url(#mapclip)">${out}</g>`;
+}
 const PLACES = [["St. Anton", 10.2636, 47.1295], ["St. Christoph", 10.1953, 47.1317], ["Pettneu", 10.3428, 47.1453],
   ["Ischgl", 10.2921, 47.0125]];
 const PEAKS = [["Valluga 2811", 10.2125, 47.1575]];
@@ -121,16 +151,19 @@ const STEPS = [10, 25, 50, 100]; // cm bands for the sequential scale
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const band = hs => hs == null ? -1 : STEPS.filter(s => hs >= s).length;
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
+const hasWind = s => s.wr != null && s.wg != null;
+const arrowOn = s => hasWind(s) && s.wg >= 1; // no direction arrow in calm air
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let state = { stations: [], readings: [], forecast: null, selected: null };
+let state = { stations: [], readings: [], forecast: null, danger: null, selected: null };
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
 
 function delta24(id) {
   const r = state.readings; if (r.length < 2) return null;
-  const last = r[r.length - 1], cutoff = new Date(last.t) - 24 * 3600e3;
-  const prev = [...r].reverse().find(x => new Date(x.t) <= cutoff);
+  const last = [...r].reverse().find(x => x.hs[id] != null); if (!last) return null;
+  const cutoff = new Date(last.t) - 24 * 3600e3, prev = [...r].reverse().find(x => new Date(x.t) <= cutoff);
   const a = last.hs[id], b = prev?.hs[id];
   return a == null || b == null ? null : Math.round(a - b);
 }
@@ -152,36 +185,69 @@ function renderSummary() {
   ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
 }
 
+const DG = ["No rating", "Low", "Moderate", "Considerable", "High", "Very high"];
+const dchip = (l, t = "") => `<span class="dg dg${l}">${l ? l + " " : ""}${t || DG[l]}</span>`;
+function renderDanger() {
+  const rs = Object.entries(state.danger?.regions || {}), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
+  box.hidden = top.hidden = !rs.length;
+  if (!rs.length) return;
+  const old = new Date(rs[0][1].valid_end) < new Date();
+  const day = new Date(rs[0][1].valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
+  const mx = Math.max(0, ...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
+  top.className = "meta" + (old ? " old" : "");
+  top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
+  box.className = "panel" + (old ? " old" : "");
+  box.innerHTML = `<h2>Avalanche danger${old ? ` <span class="meta">last bulletin ${day}, not current</span>` : ""}</h2>` + rs.map(([id, r]) => {
+    const by = {}; // highest level per elevation band, over all day periods
+    for (const x of r.ratings) { const k = x.bound + x.elevation; if (!by[k] || x.level > by[k].level) by[k] = x; }
+    const parts = Object.values(by).sort((a, b) => (a.bound === "below") - (b.bound === "below")).map(x => dchip(x.level, x.bound ? `${x.bound} ${esc(x.elevation)}${isNaN(x.elevation) ? "" : " m"}` : ""));
+    const pr = [...new Set(r.problems.map(p => p.type.replace(/_/g, " ")))].map(esc).join(", ");
+    return `<div><b>${esc(r.name)}</b> ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
+  }).join("");
+}
+
 function renderMap() {
   if (!state.stations.length) return;
   const snow = i => i < 0 ? css("--line") : css(`--snow-${i}`);
   const placed = []; // label boxes, so stations near a village or each other put their label on the other side
-  let g = `<rect width="${W}" height="${H}" rx="8" fill="${css("--land")}"/>`;
+  let g = `<rect width="${W}" height="${H}" rx="8" fill="${css("--land")}"/>` + reliefTiles(), dots = "", txt = ""; // text goes last so no dot paints over it
   for (const [n, lon, lat] of PLACES) {
     const [x, y] = xy(lon, lat);
     placed.push([x - 6, y - 12, x + 12 + n.length * 10, y + 8]);
-    g += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8" fill="${css("--village")}"/><text x="${x + 9}" y="${y + 5}" font-size="18" fill="${css("--village")}" font-weight="600">${n}</text>`;
+    g += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8" fill="${css("--village")}"/>`;
+    txt += `<text x="${x + 9}" y="${y + 5}" font-size="18" fill="${css("--village")}" font-weight="600">${n}</text>`;
   }
   for (const [n, lon, lat] of PEAKS) {
     const [x, y] = xy(lon, lat);
-    g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/><text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
+    placed.push([x - 7, y - 12, x + 10 + n.length * 9, y + 8]);
+    g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/>`;
+    txt += `<text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
   }
+  for (const s of state.stations) { const [x, y] = xy(s.lon, s.lat); placed.push([x - 13, y - (arrowOn(s) ? 42 : 13), x + 13, y + 13]); } // markers and the arrow above them
   for (const s of [...state.stations].sort((a, b) => b.lat - a.lat)) {
     const [x, y] = xy(s.lon, s.lat), sel = s.id === state.selected, b = band(s.hs);
-    const box = left => [left ? x - 190 : x + 14, y - 20, left ? x - 14 : x + 190, y + 26];
-    const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
-    const left = hit(box(false)) && !hit(box(true)) || x > W - 170;
-    placed.push(box(left));
+    const wo = s.type === "wind", val = wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
+    const w = 18 + Math.max(s.name.length * 9, val.length * 14); // approx. text width
+    const box = (left, d) => [left ? x - 14 - w : x + 14, y - 20 + d, left ? x - 14 : x + 14 + w, y + 26 + d];
+    const hit = r => r[0] < 0 || r[2] > W || placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
+    let left = false, dy = [0, 30, -30, 60, -60, 90, -90, 120, -120].find(d => !hit(box(false, d)) || !hit(box(true, d))) ?? 0; // right side first, then left, then further up/down
+    left = hit(box(false, dy));
+    placed.push(box(left, dy));
+    const wind = hasWind(s);
     const tx = left ? x - 18 : x + 18, anchor = left ? "end" : "start";
-    g += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${s.hs ?? "no"} cm">
-      <title>${esc(s.name)} · ${s.alt} m · ${s.hs ?? "–"} cm</title>
-      <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${snow(b)}" stroke="${sel ? css("--fg") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
-      <text x="${tx}" y="${y - 2}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
-      <text x="${tx}" y="${y + 22}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</text></g>`;
+    dots += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}">
+      <title>${esc(s.name)} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}</title>
+      <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${wo ? css("--panel") : snow(b)}" stroke="${sel ? css("--fg") : wo ? css("--wind") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
+      ${arrowOn(s) ? arrow(x, y - 30, (s.wr + 180) % 360, css("--wind")) : ""}
+</g>`;
+    txt += `${dy ? `<path d="M${x} ${y}L${tx + (left ? 4 : -4)} ${y + dy - 6}" stroke="${css("--muted")}" stroke-width="1" fill="none"/>` : ""}
+      <text class="lbl" data-id="${esc(s.id)}" x="${tx}" y="${y - 2 + dy}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
+      <text class="lbl" data-id="${esc(s.id)}" x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${val}</text>`;
   }
-  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}</svg>`;
+  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Map of Arlberg snow stations">${g}${dots}${txt}</svg>`;
   document.getElementById("legend").innerHTML = "Snow height: " +
-    ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ");
+    ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ") +
+    ` · <svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station · Relief: Esri World Hillshade`;
 }
 
 function renderTable() {
@@ -191,7 +257,8 @@ function renderTable() {
     const d = delta24(s.id);
     return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
       <td>${esc(s.name)}</td><td class="n">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</b></td>
-      <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td></tr>`;
+      <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td>
+      <td class="n">${hasWind(s) ? `${arrowOn(s) ? `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span> ` : ""}${Math.round(s.wg)}${s.wg_boe != null ? " / " + Math.round(s.wg_boe) : ""}` : "–"}</td></tr>`;
   }).join("");
 }
 
@@ -214,7 +281,7 @@ function renderCharts() {
   const labels = [...hist.map(p => p.x), ...proj.map(p => p.x)];
 
   document.getElementById("histTitle").textContent = `History · ${s.name}`;
-  document.getElementById("histNote").textContent = hist.length
+  document.getElementById("histNote").textContent = s.type === "wind" ? "No snow height sensor at this station." : hist.length
     ? `${hist.length} readings since ${hist[0].x}.` + (proj.length ? " Dashed line: modelled snow depth forecast." : "")
     : "No history recorded yet.";
   charts.hist?.destroy();
@@ -243,7 +310,7 @@ function renderCharts() {
   document.getElementById("fcSource").textContent = `Min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
 }
 
-function renderAll() { renderSummary(); renderMap(); renderTable(); renderCharts(); }
+function renderAll() { renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); }
 
 function select(id) {
   state.selected = id;
@@ -255,6 +322,16 @@ for (const ev of ["click", "keydown"]) document.addEventListener(ev, e => {
   const el = e.target.closest("[data-id]");
   if (el) { e.preventDefault(); select(el.dataset.id); }
 });
+const tableDetails = document.getElementById("tableDetails");
+let savedOpen = null;
+try { savedOpen = localStorage.getItem("tableOpen"); } catch {}
+const tableShown = () => savedOpen == null ? matchMedia("(min-width: 821px)").matches : savedOpen === "1";
+tableDetails.open = tableShown();
+tableDetails.addEventListener("toggle", () => {
+  if (tableDetails.open === tableShown()) return; // our own initial set, not a user toggle
+  savedOpen = tableDetails.open ? "1" : "0";
+  try { localStorage.setItem("tableOpen", savedOpen); } catch {}
+});
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
 new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
@@ -262,7 +339,8 @@ new MutationObserver(renderAll).observe(document.documentElement, { attributes: 
   const note = document.getElementById("updated");
   const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
   try {
-    const [st, fc, rd] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({}))]);
+    const [st, fc, rd, dg] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null)]);
+    state.danger = dg;
     state.stations = st.stations || [];
     state.forecast = fc;
     state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
