@@ -124,6 +124,7 @@ const band = hs => hs == null ? -1 : STEPS.filter(s => hs >= s).length;
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
 const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
 const hasWind = s => s.wr != null && s.wg != null;
+const arrowOn = s => hasWind(s) && s.wg >= 1; // no direction arrow in calm air
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let state = { stations: [], readings: [], forecast: null, selected: null };
@@ -169,22 +170,26 @@ function renderMap() {
     const [x, y] = xy(lon, lat);
     g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/><text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
   }
-  for (const s of state.stations) { const [x, y] = xy(s.lon, s.lat); placed.push([x - 14, y - 14, x + 14, y + 14]); } // markers too
+  for (const s of state.stations) { const [x, y] = xy(s.lon, s.lat); placed.push([x - 13, y - (arrowOn(s) ? 42 : 13), x + 13, y + 13]); } // markers and the arrow above them
   for (const s of [...state.stations].sort((a, b) => b.lat - a.lat)) {
     const [x, y] = xy(s.lon, s.lat), sel = s.id === state.selected, b = band(s.hs);
-    const box = (left, d = 0) => [left ? x - 190 : x + 14, y - 20 + d, left ? x - 14 : x + 190, y + 26 + d];
-    const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
-    const left = hit(box(false)) && !hit(box(true)) || x > W - 170;
-    let dy = 0; while (dy < 30 && hit(box(left, dy))) dy += 30; // both sides taken (stacked stations): push the label down
+    const wo = s.type === "wind", val = wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
+    const w = 18 + Math.max(s.name.length * 9, val.length * 14); // approx. text width
+    const box = (left, d) => [left ? x - 14 - w : x + 14, y - 20 + d, left ? x - 14 : x + 14 + w, y + 26 + d];
+    const hit = r => r[0] < 0 || r[2] > W || placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
+    let left = false, dy = 0; // right side first, then left, then lower down
+    for (; dy <= 120 && hit(box(false, dy)) && hit(box(true, dy)); dy += 30);
+    if (dy > 120) dy = 0; else left = hit(box(false, dy));
     placed.push(box(left, dy));
-    const wind = hasWind(s), wo = s.type === "wind";
+    const wind = hasWind(s);
     const tx = left ? x - 18 : x + 18, anchor = left ? "end" : "start";
     g += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}">
       <title>${esc(s.name)} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}</title>
+      ${dy ? `<path d="M${x} ${y}L${tx + (left ? 4 : -4)} ${y + dy - 6}" stroke="${css("--muted")}" stroke-width="1" fill="none"/>` : ""}
       <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${wo ? css("--panel") : snow(b)}" stroke="${sel ? css("--fg") : wo ? css("--wind") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
-      ${wind ? arrow(left ? x + 28 : x - 28, y, (s.wr + 180) % 360, css("--wind")) : ""}
+      ${arrowOn(s) ? arrow(x, y - 30, (s.wr + 180) % 360, css("--wind")) : ""}
       <text x="${tx}" y="${y - 2 + dy}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
-      <text x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : s.hs == null ? "–" : Math.round(s.hs) + " cm"}</text></g>`;
+      <text x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${val}</text></g>`;
   }
   document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}</svg>`;
   document.getElementById("legend").innerHTML = "Snow height: " +
@@ -200,7 +205,7 @@ function renderTable() {
     return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
       <td>${esc(s.name)}</td><td class="n">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</b></td>
       <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td>
-      <td class="n">${hasWind(s) ? `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span> ${Math.round(s.wg)}${s.wg_boe != null ? " / " + Math.round(s.wg_boe) : ""}` : "–"}</td></tr>`;
+      <td class="n">${hasWind(s) ? `${arrowOn(s) ? `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span> ` : ""}${Math.round(s.wg)}${s.wg_boe != null ? " / " + Math.round(s.wg_boe) : ""}` : "–"}</td></tr>`;
   }).join("");
 }
 
@@ -223,9 +228,9 @@ function renderCharts() {
   const labels = [...hist.map(p => p.x), ...proj.map(p => p.x)];
 
   document.getElementById("histTitle").textContent = `History · ${s.name}`;
-  document.getElementById("histNote").textContent = hist.length
+  document.getElementById("histNote").textContent = s.type === "wind" ? "No snow height sensor at this station." : hist.length
     ? `${hist.length} readings since ${hist[0].x}.` + (proj.length ? " Dashed line: modelled snow depth forecast." : "")
-    : s.type === "wind" ? "No snow height sensor at this station." : "No history recorded yet.";
+    : "No history recorded yet.";
   charts.hist?.destroy();
   charts.hist = new Chart(document.getElementById("hist"), {
     type: "line",
