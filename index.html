@@ -67,6 +67,11 @@ tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 .src { color: var(--muted); font-size: .78rem; }
 a { color: var(--accent); }
+.dg { display: inline-block; padding: 0 8px; border-radius: 10px; border: 1px solid transparent; font-weight: 600; font-size: .85rem; white-space: nowrap; }
+.dg1 { background: #ccff66; color: #142030; } .dg2 { background: #ffff00; color: #142030; } .dg3 { background: #ff9900; color: #142030; }
+.dg4 { background: #ff0000; color: #fff; } .dg5 { background: #000; color: #ff0000; border-color: #ff0000; } .dg0 { background: #9aa5b1; color: #142030; }
+.old .dg { opacity: .45; }
+#danger { display: grid; gap: 6px; font-size: .9rem; } #danger div { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
 </style>
 </head>
 <body>
@@ -75,11 +80,14 @@ a { color: var(--accent); }
   <header>
     <h1>Arlberg Snow Depth</h1>
     <div class="meta" id="updated">Loading station data…</div>
+    <div class="meta" id="dangerChip" hidden></div>
   </header>
 
   <section class="panel strip" id="summary" aria-label="Summary">
     <div class="stat"><b>–</b><span>Deepest station</span></div>
   </section>
+
+  <section class="panel" id="danger" aria-label="Avalanche danger" hidden></section>
 
   <div class="grid2">
     <section class="panel">
@@ -114,7 +122,7 @@ a { color: var(--accent); }
     </section>
   </div>
 
-  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
+  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Avalanche danger: Euregio bulletin (avalanche.report). Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -135,7 +143,7 @@ const hasWind = s => s.wr != null && s.wg != null;
 const arrowOn = s => hasWind(s) && s.wg >= 1; // no direction arrow in calm air
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let state = { stations: [], readings: [], forecast: null, selected: null };
+let state = { stations: [], readings: [], forecast: null, danger: null, selected: null };
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
 
@@ -162,6 +170,27 @@ function renderSummary() {
     [dAvg == null ? "–" : `${dAvg > 0 ? "+" : ""}${dAvg} cm`, "Avg change 24 h"],
     [fcSum == null ? "–" : `${fcSum} cm`, "New snow next 5 days"],
   ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+}
+
+const DG = ["No rating", "Low", "Moderate", "Considerable", "High", "Very high"];
+const dchip = (l, t = "") => `<span class="dg dg${l}">${l ? l + " " : ""}${t || DG[l]}</span>`;
+function renderDanger() {
+  const rs = Object.entries(state.danger?.regions || {}), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
+  box.hidden = top.hidden = !rs.length;
+  if (!rs.length) return;
+  const old = new Date(rs[0][1].valid_end) < new Date();
+  const day = new Date(rs[0][1].valid_start).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
+  const mx = Math.max(...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
+  top.className = "meta" + (old ? " old" : "");
+  top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
+  box.className = "panel" + (old ? " old" : "");
+  box.innerHTML = `<h2>Avalanche danger${old ? ` <span class="meta">last bulletin ${day}, not current</span>` : ""}</h2>` + rs.map(([id, r]) => {
+    const by = {}; // highest level per elevation band, over all day periods
+    for (const x of r.ratings) { const k = x.bound + x.elevation; if (!by[k] || x.level > by[k].level) by[k] = x; }
+    const parts = Object.values(by).sort((a, b) => (a.bound === "below") - (b.bound === "below")).map(x => dchip(x.level, x.bound ? `${x.bound} ${esc(x.elevation)} m` : ""));
+    const pr = [...new Set(r.problems.map(p => p.type.replace(/_/g, " ")))].map(esc).join(", ");
+    return `<div><b>${esc(r.name)}</b> ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
+  }).join("");
 }
 
 function renderMap() {
@@ -265,7 +294,7 @@ function renderCharts() {
   document.getElementById("fcSource").textContent = `Min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
 }
 
-function renderAll() { renderSummary(); renderMap(); renderTable(); renderCharts(); }
+function renderAll() { renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); }
 
 function select(id) {
   state.selected = id;
@@ -294,7 +323,8 @@ new MutationObserver(renderAll).observe(document.documentElement, { attributes: 
   const note = document.getElementById("updated");
   const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
   try {
-    const [st, fc, rd] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({}))]);
+    const [st, fc, rd, dg] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null)]);
+    state.danger = dg;
     state.stations = st.stations || [];
     state.forecast = fc;
     state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));

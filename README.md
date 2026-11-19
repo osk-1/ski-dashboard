@@ -12,7 +12,8 @@ Live page: https://osk-1.github.io/ski-dashboard/
    - `stations.json`: current readings per station (see below)
    - `forecast.json`: 5-day snowfall and min/max temperature per station
    - `readings.json`: HS per station at every 07/12/17 slot (the history)
-2. GitHub Pages serves `index.html`, which reads those three files.
+   - `danger.json`: avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current
+2. GitHub Pages serves `index.html`, which reads those files.
 
 To record now: Actions tab → "Record snow data" → Run workflow.
 
@@ -31,6 +32,7 @@ Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`w
 |---|---|
 | Stations, snow height (HS) | `https://static.avalanche.report/weather_stations/stations.geojson` |
 | History | hourly archive `https://static.avalanche.report/weather_stations/<UTC YYYY-MM-DD_HH>-00_stations.geojson` |
+| Avalanche danger | Euregio CAAMLv6 bulletin `https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json` |
 | Forecast | Open-Meteo (free tier). Falls back to MET Norway when Open-Meteo's shared daily quota is exhausted |
 
 ## Run locally

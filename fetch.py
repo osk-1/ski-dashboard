@@ -95,6 +95,24 @@ def daily_snow_from_metno(timeseries, days):
     return {d: [round(v[0], 1), v[1], v[2]] for d, v in acc.items()}
 
 
+LEVEL = {"low": 1, "moderate": 2, "considerable": 3, "high": 4, "very_high": 5}
+
+
+def parse_danger(bulletin, ids):
+    out = {}
+    for b in bulletin["bulletins"]:
+        rat = [{"level": LEVEL.get(r["mainValue"], 0),
+                "bound": "below" if "upperBound" in r.get("elevation", {}) else "above" if "lowerBound" in r.get("elevation", {}) else None,
+                "elevation": next(iter(r.get("elevation", {}).values()), None), "period": r.get("validTimePeriod")}
+               for r in b["dangerRatings"]]
+        prob = [{"type": p["problemType"], "elevation": p.get("elevation"), "aspects": p.get("aspects", [])} for p in b.get("avalancheProblems", [])]
+        for r in b["regions"]:
+            if r["regionID"] in ids and r["regionID"] not in out:
+                out[r["regionID"]] = {"name": r["name"], "published": b["publicationTime"], "valid_start": b["validTime"]["startTime"],
+                                      "valid_end": b["validTime"]["endTime"], "ratings": rat, "problems": prob}
+    return out
+
+
 def forecast(stations):
     days = [(datetime.now(TZ).date() + timedelta(days=i)).isoformat() for i in range(5)]
     try:
@@ -163,6 +181,13 @@ def main(days):
     fc["generated"] = now.isoformat(timespec="minutes")
     with open("data/forecast.json", "w") as fh:
         json.dump(fc, fh)
+    try:  # secondary source: a failure must not abort the run
+        ids = {s["region"].split()[0] for s in stations if s.get("region")}
+        regions = parse_danger(get_json("https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json"), ids)
+        with open("data/danger.json", "w") as fh:
+            json.dump({"source": "Euregio avalanche.report", "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
+    except Exception as e:
+        print("avalanche bulletin failed:", e, file=sys.stderr)
     print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fc['source']}")
 
 
@@ -182,6 +207,15 @@ def selftest():
     assert (st["type"], st["lt"], st["wg"], st["wg_boe"], st["wr"], st["hs"], st["alt"], st["hsd24"]) == ("wind", -3.4, 46.4, 83.5, 222.7, None, 2400, None)
     assert station({**f, "properties": {"name": "S", "HS": 3}, "id": "c9b477f0-c934-013d-99fc-5af9cc682f9b"})["type"] == "snow"
     assert depth(-5.2) == 0.0 and depth(None) is None
+    bl = {"bulletins": [{"publicationTime": "p", "validTime": {"startTime": "a", "endTime": "e"},
+                         "dangerRatings": [{"mainValue": "low", "elevation": {"upperBound": "2600"}, "validTimePeriod": "all_day"},
+                                           {"mainValue": "considerable", "elevation": {"lowerBound": "2600"}, "validTimePeriod": "all_day"},
+                                           {"mainValue": "no_snow"}],
+                         "avalancheProblems": [{"problemType": "wet_snow", "elevation": {"lowerBound": "2500"}, "aspects": ["S"]}],
+                         "regions": [{"name": "X", "regionID": "AT-07-07"}, {"name": "Y", "regionID": "AT-07-99"}]}]}
+    d = parse_danger(bl, {"AT-07-07"})
+    assert list(d) == ["AT-07-07"] and d["AT-07-07"]["valid_end"] == "e" and d["AT-07-07"]["problems"][0]["type"] == "wet_snow"
+    assert [(r["level"], r["bound"], r["elevation"]) for r in d["AT-07-07"]["ratings"]] == [(1, "below", "2600"), (3, "above", "2600"), (0, None, None)]
     print("selftest ok")
 
 
