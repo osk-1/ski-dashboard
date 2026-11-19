@@ -53,9 +53,11 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .leaflet-control-attribution { background: var(--panel); color: var(--muted); opacity: .85; }
 #map .leaflet-control-attribution a { color: var(--accent); }
 #map path[tabindex] { cursor: pointer; outline: none; }
-#map path[tabindex]:focus-visible { stroke: var(--fg); stroke-width: 4; }
+#map path[tabindex]:focus-visible { stroke: var(--accent); stroke-width: 4; }
 #map .leaflet-tooltip.val { background: var(--panel); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; box-shadow: none; padding: 1px 5px; font: 600 .9rem/1.2 var(--body); }
+#map.narrow .leaflet-tooltip.val { padding: 0 4px; font-size: .78rem; }
 #map .leaflet-tooltip.val::before { display: none; }
+#map .leaflet-tooltip.val.leaflet-interactive { cursor: pointer; }
 #map .val .nm { display: none; margin-right: 5px; font-weight: 400; color: var(--muted); }
 #map .val.sel .nm, #map.names .val .nm { display: inline; }
 #map .wind-ic { background: none; border: 0; }
@@ -211,16 +213,17 @@ function renderDanger() {
   }).join("");
 }
 
-let map, stnLayer, fitBounds, fitZ;
+let map, stnLayer, fitBounds, fitZ, fitCenter;
 const mapDiv = document.getElementById("map");
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
   map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16 });
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
-  fitBounds = L.latLngBounds(state.stations.map(s => [s.lat, s.lon]));
+  const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
+  fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
   const reset = () => { map.fitBounds(fitBounds, { padding: [40, 40] }); };
-  reset(); fitZ = map.getZoom(); map.setMinZoom(fitZ - 1);
+  reset(); fitZ = map.getZoom(); fitCenter = map.project(map.getCenter(), fitZ); map.setMinZoom(fitZ - 1);
   const Reset = L.Control.extend({ onAdd() {
     const d = L.DomUtil.create("div", "leaflet-bar"), b = L.DomUtil.create("button", "", d);
     b.type = "button"; b.title = "Reset view"; b.setAttribute("aria-label", "Reset view");
@@ -245,18 +248,36 @@ function renderMap() {
   if (!map) initMap();
   const focusId = document.activeElement?.dataset?.sid; // rebuilt markers must not drop keyboard focus
   stnLayer.clearLayers();
-  const placed = []; // tooltip boxes at the initial view, so close stations put the value on the other side
+  // Label layout at the fitted view in map pixels: a tooltip tries right, left, below, above and takes the first box that
+  // is inside the map and clear of dots, arrows, landmark labels and earlier tooltips.
+  const sz = map.getSize(), off = fitCenter.subtract(sz.divideBy(2)), pt = (lat, lon) => map.project([lat, lon], fitZ).subtract(off);
+  mapDiv.classList.toggle("narrow", sz.x < 480);
+  const k = sz.x < 480 ? 7 : 8, placed = [[0, 0, 50, 112]]; // zoom + reset controls
+  for (const [list, w] of [[PLACES, 7], [PEAKS, 7]]) for (const [n, lon, lat] of list) { const p = pt(lat, lon); placed.push([p.x - 6, p.y - 9, p.x + 14 + n.length * w, p.y + 9]); }
+  for (const s of state.stations) { const p = pt(s.lat, s.lon); placed.push([p.x - 14, p.y - 14, p.x + 14, p.y + 14]); if (arrowOn(s)) placed.push([p.x - 10, p.y - 36, p.x + 10, p.y - 12]); }
+  const ov = (r, q) => Math.max(0, Math.min(r[2], q[2]) - Math.max(r[0], q[0])) * Math.max(0, Math.min(r[3], q[3]) - Math.max(r[1], q[1]));
+  const cost = r => placed.reduce((c, q) => c + ov(r, q), 0) + 4 * ((r[2] - r[0]) * (r[3] - r[1]) - ov(r, [0, 0, sz.x, sz.y])); // overlap area, outside-the-map counts extra
   let focusEl;
   for (const s of [...state.stations].sort((a, b) => b.lat - a.lat)) {
     const sel = s.id === state.selected, wo = s.type === "wind", wind = hasWind(s);
     const val = wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
-    const p = map.project([s.lat, s.lon], fitZ), box = left => [p.x + (left ? -90 : 12), p.y - 12, p.x + (left ? -12 : 90), p.y + 12];
-    const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
-    const left = hit(box(false)) && !hit(box(true));
-    placed.push(box(left));
+    const p = pt(s.lat, s.lon), h = k === 7 ? 20 : 24;
+    // [direction, offset]: beside the dot first, then the four diagonals, then below and above
+    const place = w => {
+      const cands = [["right", [10, 0]], ["left", [-10, 0]], ["right", [8, 17]], ["right", [8, -17]], ["left", [-8, 17]], ["left", [-8, -17]], ["bottom", [0, 12]], ["top", [0, -12]]].map(([d, o]) => {
+        const x = d === "right" ? p.x + o[0] + 2 : d === "left" ? p.x + o[0] - 2 - w : p.x - w / 2, y = p.y + o[1] + (d === "bottom" ? 3 : d === "top" ? -3 - h : -h / 2);
+        return [d, o, [x, y, x + w, y + h]]; });
+      let best = cands[0], bc = Infinity;
+      for (const c of cands) { const k = cost(c[2]); if (k < bc) { bc = k; best = c; } }
+      return [...best, bc]; };
+    const vw = 14 + k * val.length;
+    let [dir, offset, bx, bc] = place(sel ? vw + k * (s.name.length + 1) : vw), full = sel;
+    if (sel && bc > 0) { [dir, offset, bx] = place(vw); full = false; } // no room for the name: value only
+    placed.push(bx);
     const m = L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : wo ? css("--wind") : css("--panel"), fillColor: wo ? css("--panel") : snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
-    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: left ? "left" : "right", offset: [left ? -10 : 10, 0], className: "val" + (sel ? " sel" : "") });
+    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (full ? " sel" : "") });
     m.on("click", () => select(s.id));
+    m.getTooltip().on("click", () => select(s.id));
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
     t.textContent = `${s.name} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
     el.append(t);
@@ -264,7 +285,7 @@ function renderMap() {
     el.setAttribute("aria-label", `${s.name}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}`);
     el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(s.id); } });
     if (s.id === focusId) focusEl = el;
-    if (arrowOn(s)) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(stnLayer);
+    if (arrowOn(s)) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, sel ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(stnLayer);
   }
   focusEl?.focus();
 }
