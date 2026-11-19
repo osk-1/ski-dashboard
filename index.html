@@ -41,7 +41,8 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 .stat span { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
 svg.map { width: 100%; height: auto; display: block; }
 .map .relief { opacity: var(--relief-op); mix-blend-mode: var(--relief-blend); filter: var(--relief-filter); }
-.map text { font-family: var(--body); }
+.map text { font-family: var(--body); paint-order: stroke; stroke: var(--land); stroke-width: 3px; stroke-linejoin: round; }
+.map .lbl { cursor: pointer; }
 .map .stn { cursor: pointer; }
 .map .stn:focus-visible circle { stroke: var(--fg); stroke-width: 3; }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
@@ -161,8 +162,8 @@ try { state.selected = localStorage.getItem("sel"); } catch {}
 
 function delta24(id) {
   const r = state.readings; if (r.length < 2) return null;
-  const last = r[r.length - 1], cutoff = new Date(last.t) - 24 * 3600e3;
-  const prev = [...r].reverse().find(x => new Date(x.t) <= cutoff);
+  const last = [...r].reverse().find(x => x.hs[id] != null); if (!last) return null;
+  const cutoff = new Date(last.t) - 24 * 3600e3, prev = [...r].reverse().find(x => new Date(x.t) <= cutoff);
   const a = last.hs[id], b = prev?.hs[id];
   return a == null || b == null ? null : Math.round(a - b);
 }
@@ -192,14 +193,14 @@ function renderDanger() {
   if (!rs.length) return;
   const old = new Date(rs[0][1].valid_end) < new Date();
   const day = new Date(rs[0][1].valid_start).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
-  const mx = Math.max(...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
+  const mx = Math.max(0, ...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
   top.className = "meta" + (old ? " old" : "");
   top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
   box.className = "panel" + (old ? " old" : "");
   box.innerHTML = `<h2>Avalanche danger${old ? ` <span class="meta">last bulletin ${day}, not current</span>` : ""}</h2>` + rs.map(([id, r]) => {
     const by = {}; // highest level per elevation band, over all day periods
     for (const x of r.ratings) { const k = x.bound + x.elevation; if (!by[k] || x.level > by[k].level) by[k] = x; }
-    const parts = Object.values(by).sort((a, b) => (a.bound === "below") - (b.bound === "below")).map(x => dchip(x.level, x.bound ? `${x.bound} ${esc(x.elevation)} m` : ""));
+    const parts = Object.values(by).sort((a, b) => (a.bound === "below") - (b.bound === "below")).map(x => dchip(x.level, x.bound ? `${x.bound} ${esc(x.elevation)}${isNaN(x.elevation) ? "" : " m"}` : ""));
     const pr = [...new Set(r.problems.map(p => p.type.replace(/_/g, " ")))].map(esc).join(", ");
     return `<div><b>${esc(r.name)}</b> ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
   }).join("");
@@ -209,15 +210,18 @@ function renderMap() {
   if (!state.stations.length) return;
   const snow = i => i < 0 ? css("--line") : css(`--snow-${i}`);
   const placed = []; // label boxes, so stations near a village or each other put their label on the other side
-  let g = `<rect width="${W}" height="${H}" rx="8" fill="${css("--land")}"/>` + reliefTiles();
+  let g = `<rect width="${W}" height="${H}" rx="8" fill="${css("--land")}"/>` + reliefTiles(), dots = "", txt = ""; // text goes last so no dot paints over it
   for (const [n, lon, lat] of PLACES) {
     const [x, y] = xy(lon, lat);
     placed.push([x - 6, y - 12, x + 12 + n.length * 10, y + 8]);
-    g += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8" fill="${css("--village")}"/><text x="${x + 9}" y="${y + 5}" font-size="18" fill="${css("--village")}" font-weight="600">${n}</text>`;
+    g += `<rect x="${x - 4}" y="${y - 4}" width="8" height="8" fill="${css("--village")}"/>`;
+    txt += `<text x="${x + 9}" y="${y + 5}" font-size="18" fill="${css("--village")}" font-weight="600">${n}</text>`;
   }
   for (const [n, lon, lat] of PEAKS) {
     const [x, y] = xy(lon, lat);
-    g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/><text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
+    placed.push([x - 7, y - 12, x + 10 + n.length * 9, y + 8]);
+    g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/>`;
+    txt += `<text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
   }
   for (const s of state.stations) { const [x, y] = xy(s.lon, s.lat); placed.push([x - 13, y - (arrowOn(s) ? 42 : 13), x + 13, y + 13]); } // markers and the arrow above them
   for (const s of [...state.stations].sort((a, b) => b.lat - a.lat)) {
@@ -226,21 +230,21 @@ function renderMap() {
     const w = 18 + Math.max(s.name.length * 9, val.length * 14); // approx. text width
     const box = (left, d) => [left ? x - 14 - w : x + 14, y - 20 + d, left ? x - 14 : x + 14 + w, y + 26 + d];
     const hit = r => r[0] < 0 || r[2] > W || placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
-    let left = false, dy = 0; // right side first, then left, then lower down
-    for (; dy <= 120 && hit(box(false, dy)) && hit(box(true, dy)); dy += 30);
-    if (dy > 120) dy = 0; else left = hit(box(false, dy));
+    let left = false, dy = [0, 30, -30, 60, -60, 90, -90, 120, -120].find(d => !hit(box(false, d)) || !hit(box(true, d))) ?? 0; // right side first, then left, then further up/down
+    left = hit(box(false, dy));
     placed.push(box(left, dy));
     const wind = hasWind(s);
     const tx = left ? x - 18 : x + 18, anchor = left ? "end" : "start";
-    g += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}">
+    dots += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}">
       <title>${esc(s.name)} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}</title>
-      ${dy ? `<path d="M${x} ${y}L${tx + (left ? 4 : -4)} ${y + dy - 6}" stroke="${css("--muted")}" stroke-width="1" fill="none"/>` : ""}
       <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${wo ? css("--panel") : snow(b)}" stroke="${sel ? css("--fg") : wo ? css("--wind") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
       ${arrowOn(s) ? arrow(x, y - 30, (s.wr + 180) % 360, css("--wind")) : ""}
-      <text x="${tx}" y="${y - 2 + dy}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
-      <text x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${val}</text></g>`;
+</g>`;
+    txt += `${dy ? `<path d="M${x} ${y}L${tx + (left ? 4 : -4)} ${y + dy - 6}" stroke="${css("--muted")}" stroke-width="1" fill="none"/>` : ""}
+      <text class="lbl" data-id="${esc(s.id)}" x="${tx}" y="${y - 2 + dy}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
+      <text class="lbl" data-id="${esc(s.id)}" x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${val}</text>`;
   }
-  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}</svg>`;
+  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}${dots}${txt}</svg>`;
   document.getElementById("legend").innerHTML = "Snow height: " +
     ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ") +
     ` · <svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station · Relief: Esri World Hillshade`;

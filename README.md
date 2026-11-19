@@ -1,6 +1,6 @@
 # Arlberg Snow Depth
 
-Snow height at the Lawinenwarndienst Tirol weather stations around St. Anton / Rendl,
+Snow height at the Lawinenwarndienst Tirol (plus two GeoSphere Austria) weather stations around St. Anton / Rendl,
 with history and a 5-day snowfall forecast.
 
 Live page: https://osk-1.github.io/ski-dashboard/
@@ -21,6 +21,7 @@ To record now: Actions tab → "Record snow data" → Run workflow.
 
 A fixed list (`STATIONS` in `fetch.py`, 6 snow + 5 wind stations: Ulmerhütte, Kapall, Äußere Rendlalpe, Gampberg,
 Kartellboden-Damm, Dias, Hochkar, Kappl Kapplerkopf, Lattejoch); a station missing from the feed is warned about on stderr.
+St. Anton (Tal) and Galzig come from GeoSphere TAWES instead (`id` `TAWES-<id>`, `region` null; Galzig is wind-only, no snow gauge).
 Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`wind`), `lon, lat, alt`,
 `hs` (snow height cm), `n24` (new snow 24 h cm), `hsd24` (HS change 24 h cm), `lt` (air temp °C),
 `wg` (mean wind km/h), `wg_boe` (gust km/h), `wr` (wind direction °), `date`. Missing values are `null`.

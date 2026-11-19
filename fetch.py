@@ -67,7 +67,7 @@ def station(f):
 
 
 def parse_tawes(gj, names):
-    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h; SCHNEE null = wind-only."""
+    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h."""
     out = []
     for f in gj["features"]:
         p, id = f["properties"]["parameters"], f["properties"]["station"]
@@ -132,9 +132,9 @@ def parse_danger(bulletin, ids):
     out = {}
     for b in bulletin["bulletins"]:
         rat = [{"level": LEVEL.get(r["mainValue"], 0),
-                "bound": "below" if "upperBound" in r.get("elevation", {}) else "above" if "lowerBound" in r.get("elevation", {}) else None,
-                "elevation": next(iter(r.get("elevation", {}).values()), None), "period": r.get("validTimePeriod")}
-               for r in b["dangerRatings"]]
+                "bound": "below" if "upperBound" in el else "above" if "lowerBound" in el else None,
+                "elevation": next(iter(el.values()), None), "period": r.get("validTimePeriod")}
+               for r in b["dangerRatings"] for el in [r.get("elevation") or {}]]
         prob = [{"type": p["problemType"], "elevation": p.get("elevation"), "aspects": p.get("aspects", [])} for p in b.get("avalancheProblems", [])]
         for r in b["regions"]:
             if r["regionID"] in ids and r["regionID"] not in out:
@@ -224,10 +224,15 @@ def main(days):
 
     with open("data/stations.json", "w") as fh:
         json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
-    fc = forecast(stations)
-    fc["generated"] = now.isoformat(timespec="minutes")
-    with open("data/forecast.json", "w") as fh:
-        json.dump(fc, fh)
+    fsrc = "failed"
+    try:  # secondary source: a failure must not abort the run
+        fc = forecast(stations)
+        fc["generated"] = now.isoformat(timespec="minutes")
+        with open("data/forecast.json", "w") as fh:
+            json.dump(fc, fh)
+        fsrc = fc["source"]
+    except Exception as e:
+        print("forecast failed:", e, file=sys.stderr)
     try:  # secondary source: a failure must not abort the run
         ids = {s["region"].split()[0] for s in stations if s.get("region")}
         regions = parse_danger(get_json("https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json"), ids)
@@ -235,7 +240,7 @@ def main(days):
             json.dump({"source": "Euregio avalanche.report", "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
     except Exception as e:
         print("avalanche bulletin failed:", e, file=sys.stderr)
-    print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fc['source']}")
+    print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fsrc}")
 
 
 def selftest():
@@ -257,12 +262,13 @@ def selftest():
     bl = {"bulletins": [{"publicationTime": "p", "validTime": {"startTime": "a", "endTime": "e"},
                          "dangerRatings": [{"mainValue": "low", "elevation": {"upperBound": "2600"}, "validTimePeriod": "all_day"},
                                            {"mainValue": "considerable", "elevation": {"lowerBound": "2600"}, "validTimePeriod": "all_day"},
+                                           {"mainValue": "moderate", "elevation": {"lowerBound": "treeline"}}, {"mainValue": "low", "elevation": None},
                                            {"mainValue": "no_snow"}],
                          "avalancheProblems": [{"problemType": "wet_snow", "elevation": {"lowerBound": "2500"}, "aspects": ["S"]}],
                          "regions": [{"name": "X", "regionID": "AT-07-07"}, {"name": "Y", "regionID": "AT-07-99"}]}]}
     d = parse_danger(bl, {"AT-07-07"})
     assert list(d) == ["AT-07-07"] and d["AT-07-07"]["valid_end"] == "e" and d["AT-07-07"]["problems"][0]["type"] == "wet_snow"
-    assert [(r["level"], r["bound"], r["elevation"]) for r in d["AT-07-07"]["ratings"]] == [(1, "below", "2600"), (3, "above", "2600"), (0, None, None)]
+    assert [(r["level"], r["bound"], r["elevation"]) for r in d["AT-07-07"]["ratings"]] == [(1, "below", "2600"), (3, "above", "2600"), (2, "above", "treeline"), (1, None, None), (0, None, None)]
     gj = {"timestamps": ["2026-11-19T05:50+00:00", "2026-11-19T06:00+00:00"], "features": [
         {"geometry": {"coordinates": [10.23, 47.13]}, "properties": {"station": "11110", "parameters": {
             "SCHNEE": {"data": [None, None]}, "TL": {"data": [-1, -2.1]}, "FF": {"data": [1, 5.5]}, "FFX": {"data": [2, 9.6]}, "DD": {"data": [1, 273.0]}}}},
