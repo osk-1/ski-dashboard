@@ -14,9 +14,6 @@ The 10-minute offset gives the hourly station snapshot time to appear.
 
 ## Prompt for each run
 
-```
-Record th## Prompt for each run
-
 Scheduled sessions get no GitHub access to this private repo, so `fetch.py` is also published next to
 the artifact page and the run downloads it from there. **After changing `fetch.py`, republish the
 artifact with `fetch.py` in its files** (ask Claude: "republish the artifact with the new fetch.py").
