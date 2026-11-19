@@ -9,7 +9,7 @@ Live page (private claude.ai artifact): https://claude.ai/artifact/DYQWzaKaoTBmZ
 
 Artifact pages can't call outside APIs from the browser, so data flows through the artifact's database:
 
-1. A scheduled Claude Code task runs at 07:10, 12:10 and 17:10 (Vienna) and runs `fetch.py`.
+1. A scheduled Claude Code task runs at 07:10, 12:10 and 17:10 (Vienna) and runs `fetch.py` (setup: [SCHEDULE.md](SCHEDULE.md)).
 2. `fetch.py` writes JSON docs into `out/`:
    - `stations.json` → db `meta/stations` (current HS per station)
    - `forecast.json` → db `forecast/latest` (5-day snowfall, min/max temp)
