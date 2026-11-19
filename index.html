@@ -192,7 +192,7 @@ function renderDanger() {
   box.hidden = top.hidden = !rs.length;
   if (!rs.length) return;
   const old = new Date(rs[0][1].valid_end) < new Date();
-  const day = new Date(rs[0][1].valid_start).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
+  const day = new Date(rs[0][1].valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
   const mx = Math.max(0, ...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
   top.className = "meta" + (old ? " old" : "");
   top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
@@ -244,7 +244,7 @@ function renderMap() {
       <text class="lbl" data-id="${esc(s.id)}" x="${tx}" y="${y - 2 + dy}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
       <text class="lbl" data-id="${esc(s.id)}" x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${val}</text>`;
   }
-  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}${dots}${txt}</svg>`;
+  document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="group" aria-label="Map of Arlberg snow stations">${g}${dots}${txt}</svg>`;
   document.getElementById("legend").innerHTML = "Snow height: " +
     ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ") +
     ` · <svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station · Relief: Esri World Hillshade`;
