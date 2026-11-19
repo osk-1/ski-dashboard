@@ -9,19 +9,19 @@
 /* Layout: summary strip, then map beside the station list, then history + forecast for the selected station. */
 :root {
   --bg: #f4f7fa; --panel: #ffffff; --fg: #142030; --muted: #5b6b7d; --line: #d8e0e8;
-  --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c;
+  --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c; --wind: #c0561a;
   --snow-0: #e6eef8; --snow-1: #b9d0ee; --snow-2: #7fa9de; --snow-3: #3f7cc8; --snow-4: #1a4f9c;
   --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
-  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
+  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873; --wind: #f0a060;
   --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
   color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
-  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873;
+  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873; --wind: #f0a060;
   --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
   color-scheme: dark }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
@@ -44,6 +44,7 @@ svg.map { width: 100%; height: auto; display: block; }
 .map .stn { cursor: pointer; }
 .map .stn:focus-visible circle { stroke: var(--fg); stroke-width: 3; }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
+.legend svg { vertical-align: middle; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .tablebox { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -84,8 +85,8 @@ a { color: var(--accent); }
       <h2>Snow height (HS)</h2>
       <div class="tablebox">
         <table>
-          <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="4" class="empty">Loading readings…</td></tr></tbody>
+          <thead><tr><th>Station</th><th class="n">Alt.</th><th class="n">HS</th><th class="n">24 h</th><th class="n">Wind</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="empty">Loading readings…</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -121,6 +122,8 @@ const STEPS = [10, 25, 50, 100]; // cm bands for the sequential scale
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const band = hs => hs == null ? -1 : STEPS.filter(s => hs >= s).length;
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
+const hasWind = s => s.wr != null && s.wg != null;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 let state = { stations: [], readings: [], forecast: null, selected: null };
@@ -166,22 +169,27 @@ function renderMap() {
     const [x, y] = xy(lon, lat);
     g += `<path d="M${x - 7} ${y + 6}L${x} ${y - 7}L${x + 7} ${y + 6}Z" fill="${css("--muted")}"/><text x="${x + 10}" y="${y + 5}" font-size="16" fill="${css("--muted")}">${n}</text>`;
   }
+  for (const s of state.stations) { const [x, y] = xy(s.lon, s.lat); placed.push([x - 14, y - 14, x + 14, y + 14]); } // markers too
   for (const s of [...state.stations].sort((a, b) => b.lat - a.lat)) {
     const [x, y] = xy(s.lon, s.lat), sel = s.id === state.selected, b = band(s.hs);
-    const box = left => [left ? x - 190 : x + 14, y - 20, left ? x - 14 : x + 190, y + 26];
+    const box = (left, d = 0) => [left ? x - 190 : x + 14, y - 20 + d, left ? x - 14 : x + 190, y + 26 + d];
     const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]);
     const left = hit(box(false)) && !hit(box(true)) || x > W - 170;
-    placed.push(box(left));
+    let dy = 0; while (dy < 30 && hit(box(left, dy))) dy += 30; // both sides taken (stacked stations): push the label down
+    placed.push(box(left, dy));
+    const wind = hasWind(s), wo = s.type === "wind";
     const tx = left ? x - 18 : x + 18, anchor = left ? "end" : "start";
-    g += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${s.hs ?? "no"} cm">
-      <title>${esc(s.name)} · ${s.alt} m · ${s.hs ?? "–"} cm</title>
-      <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${snow(b)}" stroke="${sel ? css("--fg") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
-      <text x="${tx}" y="${y - 2}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
-      <text x="${tx}" y="${y + 22}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</text></g>`;
+    g += `<g class="stn" tabindex="0" role="button" data-id="${esc(s.id)}" aria-label="${esc(s.name)}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}">
+      <title>${esc(s.name)} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}</title>
+      <circle cx="${x}" cy="${y}" r="${sel ? 15 : 12}" fill="${wo ? css("--panel") : snow(b)}" stroke="${sel ? css("--fg") : wo ? css("--wind") : css("--panel")}" stroke-width="${sel ? 3 : 2}"/>
+      ${wind ? arrow(left ? x + 28 : x - 28, y, (s.wr + 180) % 360, css("--wind")) : ""}
+      <text x="${tx}" y="${y - 2 + dy}" font-size="17" text-anchor="${anchor}" fill="${css("--muted")}">${esc(s.name)}</text>
+      <text x="${tx}" y="${y + 22 + dy}" font-size="24" text-anchor="${anchor}" font-weight="600" fill="${css("--fg")}">${wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : s.hs == null ? "–" : Math.round(s.hs) + " cm"}</text></g>`;
   }
   document.getElementById("map").innerHTML = `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of Arlberg snow stations">${g}</svg>`;
   document.getElementById("legend").innerHTML = "Snow height: " +
-    ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ");
+    ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ") +
+    ` · <svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station`;
 }
 
 function renderTable() {
@@ -191,7 +199,8 @@ function renderTable() {
     const d = delta24(s.id);
     return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
       <td>${esc(s.name)}</td><td class="n">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + " cm"}</b></td>
-      <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td></tr>`;
+      <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td>
+      <td class="n">${hasWind(s) ? `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span> ${Math.round(s.wg)}${s.wg_boe != null ? " / " + Math.round(s.wg_boe) : ""}` : "–"}</td></tr>`;
   }).join("");
 }
 
@@ -216,7 +225,7 @@ function renderCharts() {
   document.getElementById("histTitle").textContent = `History · ${s.name}`;
   document.getElementById("histNote").textContent = hist.length
     ? `${hist.length} readings since ${hist[0].x}.` + (proj.length ? " Dashed line: modelled snow depth forecast." : "")
-    : "No history recorded yet.";
+    : s.type === "wind" ? "No snow height sensor at this station." : "No history recorded yet.";
   charts.hist?.destroy();
   charts.hist = new Chart(document.getElementById("hist"), {
     type: "line",
