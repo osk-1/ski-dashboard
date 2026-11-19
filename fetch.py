@@ -2,9 +2,9 @@
 """Fetch Arlberg snow data into ./data/ for the dashboard (run by GitHub Actions).
 
 Writes:
-  data/stations.json   current snow height per station
+  data/stations.json   current readings per station (snow height, wind, temperature)
   data/forecast.json   5-day snowfall and min/max temperature per station
-  data/readings.json   {slot: {t, hs}} history; slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, never pruned
+  data/readings.json   {slot: {t, hs}} history of snow stations; slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, never pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
@@ -15,7 +15,10 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Vienna")
 SLOT_HOURS = (7, 12, 17)
-BBOX = (10.18, 47.0, 10.42, 47.22)  # lon/lat box around St. Anton / Rendl / Kapall / Stanzertal
+# Feed IDs (LWD-Nummer, or feature id when none): snow stations, then wind stations
+STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc682f9b", "KDIA2",
+            "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
+WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
 LWD = "https://static.avalanche.report/weather_stations/"
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
 
@@ -30,17 +33,35 @@ def snapshot_url(slot_local):
     return LWD + slot_local.astimezone(timezone.utc).strftime("%Y-%m-%d_%H-00") + "_stations.geojson"
 
 
-def in_bbox(f):
-    lon, lat = f["geometry"]["coordinates"][:2]
-    return BBOX[0] <= lon <= BBOX[2] and BBOX[1] <= lat <= BBOX[3]
-
-
 def num(v):
     return None if v is None else round(float(v), 1)
 
 
 def depth(v):
     return None if v is None else max(0.0, num(v))  # sensors read slightly negative on bare ground
+
+
+def station(f):
+    p, id = f["properties"], f["properties"].get("LWD-Nummer") or f["id"]
+    return {
+        "id": id,
+        "uuid": f["id"],
+        "name": p["name"],
+        "region": p.get("LWD-Region"),
+        "type": "wind" if id in WIND else "snow",
+        "lon": round(f["geometry"]["coordinates"][0], 5),
+        "lat": round(f["geometry"]["coordinates"][1], 5),
+        "alt": int(f["geometry"]["coordinates"][2]),
+        "hs": depth(p.get("HS")),
+        "n24": num(p.get("N24")),
+        "hsd24": num(p.get("HSD24")),
+        "lt": num(p.get("LT")),
+        # WG = mean wind speed km/h, WG_BOE = gust km/h (verified: WG 46 vs WG_BOE 84 on wind stations), WR = direction °
+        "wg": num(p.get("WG")),
+        "wg_boe": num(p.get("WG_BOE")),
+        "wr": num(p.get("WR")),
+        "date": p.get("date"),
+    }
 
 
 def slots(days, now):
@@ -114,20 +135,10 @@ def forecast(stations):
 
 def main(days):
     now = datetime.now(TZ)
-    live = [f for f in get_json(LWD + "stations.geojson")["features"] if in_bbox(f) and f["properties"].get("HS") is not None]
-    stations = [{
-        "id": f["properties"].get("LWD-Nummer") or f["id"],
-        "uuid": f["id"],
-        "name": f["properties"]["name"],
-        "region": f["properties"].get("LWD-Region"),
-        "lon": round(f["geometry"]["coordinates"][0], 5),
-        "lat": round(f["geometry"]["coordinates"][1], 5),
-        "alt": int(f["geometry"]["coordinates"][2]),
-        "hs": depth(f["properties"].get("HS")),
-        "n24": num(f["properties"].get("N24")),
-        "date": f["properties"].get("date"),
-    } for f in live]
-    by_uuid = {s["uuid"]: s["id"] for s in stations}
+    stations = [station(f) for f in get_json(LWD + "stations.geojson")["features"] if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
+    for m in set(STATIONS) - {x["id"] for x in stations}:
+        print("station missing from feed:", m, file=sys.stderr)
+    by_uuid = {s["uuid"]: s["id"] for s in stations if s["type"] == "snow"}
 
     os.makedirs("data", exist_ok=True)
     try:
@@ -165,6 +176,11 @@ def selftest():
           {"time": "2026-11-19T11:00:00Z", "data": {"instant": {"details": {"air_temperature": 3}},
                                                      "next_1_hours": {"details": {"precipitation_amount": 5}}}}]
     assert daily_snow_from_metno(ts, ["2026-11-19"]) == {"2026-11-19": [2.0, -3, 3]}
+    f = {"id": "u", "geometry": {"coordinates": [10.3, 47.1, 2400.7]},
+         "properties": {"LWD-Nummer": "SKAP1", "name": "W", "HS": None, "LT": -3.44, "WG": 46.352, "WG_BOE": 83.484, "WR": 222.655}}
+    st = station(f)
+    assert (st["type"], st["lt"], st["wg"], st["wg_boe"], st["wr"], st["hs"], st["alt"], st["hsd24"]) == ("wind", -3.4, 46.4, 83.5, 222.7, None, 2400, None)
+    assert station({**f, "properties": {"name": "S", "HS": 3}, "id": "c9b477f0-c934-013d-99fc-5af9cc682f9b"})["type"] == "snow"
     assert depth(-5.2) == 0.0 and depth(None) is None
     print("selftest ok")
 
