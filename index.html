@@ -59,6 +59,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .leaflet-tooltip.val::before { display: none; }
 #map .leaflet-tooltip.val.leaflet-interactive { cursor: pointer; }
 #map .val .nm { display: none; margin-right: 5px; font-weight: 400; color: var(--muted); }
+#map .val.sel { z-index: 1000; }
 #map .val.sel .nm, #map.names .val .nm { display: inline; }
 #map .wind-ic { background: none; border: 0; }
 #map .pl { position: absolute; left: -4px; top: -9px; display: flex; align-items: center; gap: 5px; white-space: nowrap; font: 600 .8rem/1 var(--body); color: var(--village); text-shadow: 0 0 3px var(--land), 0 0 3px var(--land), 0 0 3px var(--land); }
@@ -226,8 +227,11 @@ function initMap() {
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
   const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
   fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
-  const reset = () => { map.fitBounds(fitBounds, { padding: [40, 40] }); };
-  reset(); fitZ = map.getZoom(); fitCenter = map.project(map.getCenter(), fitZ); map.setMinZoom(fitZ - 1);
+  const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40] }); }; // extra left padding keeps the view clear of the zoom/reset controls
+  const fit = () => { reset(); fitZ = map.getZoom(); fitCenter = map.project(map.getCenter(), fitZ); map.setMinZoom(fitZ - 1); };
+  fit();
+  let timer;
+  map.on("resize", () => { clearTimeout(timer); timer = setTimeout(() => { fit(); renderMap(); }, 150); });
   const Reset = L.Control.extend({ onAdd() {
     const d = L.DomUtil.create("div", "leaflet-bar"), b = L.DomUtil.create("button", "", d);
     b.type = "button"; b.title = "Reset view"; b.setAttribute("aria-label", "Reset view");
@@ -287,12 +291,11 @@ function renderMap() {
     const bestSpot = w => spots.map(([dir, off]) => ({ dir, off, box: tipBox(dir, off, w) }))
       .reduce((best, c) => (c.cost = costAgainst(taken, c.box)) < best.cost ? c : best, { cost: Infinity });
     const valW = 14 + charW * val.length;
-    let spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW), withName = sel;
-    if (sel && spot.cost > 0) { spot = bestSpot(valW); withName = false; } // no room for the name: value only
+    const spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW); // the selected station always keeps its name, even if it must overlap
     taken.push(spot.box);
     const dir = spot.dir, offset = spot.off;
     const m = L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : wo ? css("--wind") : css("--panel"), fillColor: wo ? css("--panel") : snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
-    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (withName ? " sel" : "") });
+    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
     m.on("click", () => select(s.id));
     m.getTooltip().on("click", () => select(s.id));
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
