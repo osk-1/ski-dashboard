@@ -263,9 +263,9 @@ def tirol_hours(feats, by_uuid):
     out = {}
     for f in feats:
         p, st = f["properties"], by_uuid.get(f["id"])
-        if st and p.get("date") and (k := hkey(datetime.fromisoformat(p["date"]))):
+        if st and p.get("date"):
             add(
-                out.setdefault(k, {x: {} for x in HFIELDS}),
+                out.setdefault(hkey(datetime.fromisoformat(p["date"])), {x: {} for x in HFIELDS}),
                 st["id"],
                 lt=num(p.get("LT")),
                 oft=num(p.get("OFT")),
@@ -281,7 +281,7 @@ def tirol_hours(feats, by_uuid):
 def missing_hours(hours, ids, now):
     """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value."""
     have = {k for k, v in hours.items() if any(id in v.get(f, {}) for f in MEASURED for id in ids)}
-    t = now.astimezone(TZ).replace(minute=0, second=0, microsecond=0)
+    t = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)  # step in UTC: local wall hours skip/repeat on DST days
     out = [t - timedelta(hours=i) for i in range(HOURLY_DAYS * 24, 0, -1)]
     return [x for x in out if hkey(x) not in have]
 
@@ -289,14 +289,14 @@ def missing_hours(hours, ids, now):
 def hs_rise(hours, ids):
     """hr[id] at k = positive HS change from the hour before (0 when it fell or stayed); only where both hours have hs."""
     for k, v in hours.items():
-        prev = hours.get((datetime.strptime(k, "%Y-%m-%dT%H") - timedelta(hours=1)).strftime("%Y-%m-%dT%H"), {}).get("hs", {})
+        prev = hours.get(hkey(datetime.strptime(k, "%Y-%m-%dT%H").replace(tzinfo=TZ).astimezone(timezone.utc) - timedelta(hours=1)), {}).get("hs", {})
         hr = {id: num(max(0.0, x - prev[id])) for id, x in v.get("hs", {}).items() if id in ids and id in prev}
         if hr:
             v["hr"] = hr
 
 
 def prune_hours(hours, now):
-    cutoff = hkey(now - timedelta(days=HOURLY_DAYS))  # keys sort lexicographically; future model hours stay
+    cutoff = hkey(now.astimezone(timezone.utc) - timedelta(days=HOURLY_DAYS))  # keys sort lexicographically; future model hours stay
     return {k: v for k, v in hours.items() if k >= cutoff}
 
 
@@ -447,17 +447,23 @@ def main(days):
     try:
         with open("data/hourly.json") as fh:
             hourly = json.load(fh)
-    except FileNotFoundError:
+        hours = hourly["hours"]
+    except (FileNotFoundError, ValueError, KeyError, TypeError) as e:
+        if not isinstance(e, FileNotFoundError):
+            print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
         hourly = {"model": {"source": None, "issued": None}, "hours": {}}
-    hours = hourly["hours"]
+        hours = hourly["hours"]
     for t in missing_hours(hours, STATIONS, now):  # Tirol archive: only hours not yet recorded
         try:
             for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
                 hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
         except Exception as e:
             print("skip hour", t.isoformat(), e, file=sys.stderr)
-    for k, maps in tirol_hours(live, by_uuid).items():
-        hmerge(hours, k, maps, keep=True)
+    try:
+        for k, maps in tirol_hours(live, by_uuid).items():
+            hmerge(hours, k, maps, keep=True)
+    except Exception as e:
+        print("live hour failed:", e, file=sys.stderr)
     sl = slots(days, now)
     iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
     for s in sl:
@@ -522,6 +528,7 @@ def main(days):
         fsrc = fc["source"]
     except Exception as e:
         print("forecast failed:", e, file=sys.stderr)
+        hourly["model"] = {"source": None, "issued": hourly["model"].get("issued")}
     hs_rise(hours, STATIONS)
     hourly["hours"] = prune_hours(hours, now)
     with open("data/hourly.json", "w") as fh:
@@ -740,6 +747,18 @@ def selftest():
     }
     hs_rise(hr, STATIONS)
     assert [hr[k].get("hr") for k in sorted(hr)] == [None, {"SKAP2": 0.8}, {"SKAP2": 0.0}, None]  # no negative, no gap-spanning rise, Tirol ids only
+    for d, n in [(datetime(2026, 3, 29, 8, 30, tzinfo=TZ), 168), (datetime(2026, 10, 25, 8, 30, tzinfo=TZ), 167)]:
+        mk = [hkey(t) for t in missing_hours({}, STATIONS, d)]  # 168 real hours; autumn repeats T02, spring has no T02
+        assert (len(mk), len(set(mk)), "2026-03-29T02" in mk, sorted(prune_hours(dict.fromkeys(mk, 1), d)) == sorted(set(mk))) == (168, n, False, True)
+    hd = {
+        "2026-03-29T01": {"hs": {"SKAP2": 10}},
+        "2026-03-29T03": {"hs": {"SKAP2": 11}},
+        "2026-10-25T01": {"hs": {"SKAP2": 10}},
+        "2026-10-25T02": {"hs": {"SKAP2": 11}},
+    }
+    hd["2026-10-25T03"] = {"hs": {"SKAP2": 12}}
+    hs_rise(hd, STATIONS)
+    assert [hd[k].get("hr") for k in sorted(hd)] == [None, {"SKAP2": 1.0}, None, {"SKAP2": 1.0}, {"SKAP2": 1.0}]  # 01 -> 03 CEST is one real hour
     assert sorted(prune_hours({"2026-11-13T07": 1, "2026-11-13T08": 1, "2026-11-25T23": 1}, now)) == ["2026-11-13T08", "2026-11-25T23"]
     om = {
         "daily": {
