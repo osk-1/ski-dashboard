@@ -324,7 +324,7 @@ const nsDraw = url => new Promise((ok, no) => { const im = new Image(); im.cross
 const nsPng = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
   const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); ok({ W: im.width, H: im.height, d: g.getImageData(0, 0, im.width, im.height).data }); } catch (e) { no(e); } }; im.src = url; });
 function nsClick(e) { // value of the new-snow PNG under the click, as a pin with a tooltip
-  if (!nsOv) return;
+  if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive,.pl")) return; // stations, their value tags and landmark labels are not map spots
   const url = nsUrl(nsRange().dataOverlayURL, nsEnd), cur = nsCur();
   (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (!nsOv || nsCur() !== cur) return; // the selection moved on while this loaded
     const B = nsCfg.boundingBoxes.find(b => b.lambert).lambert, [x, y] = lambert(e.latlng.lat, e.latlng.lng), col = Math.floor((x - B[0]) / ((B[2] - B[0]) / W)), row = Math.floor((B[3] - y) / ((B[3] - B[1]) / H));
