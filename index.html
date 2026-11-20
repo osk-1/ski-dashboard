@@ -607,6 +607,7 @@ async function load() {
     if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;
     lastLoad = Date.now();
+    if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); } // restyle polygons for the new bulletin
     renderAll();
   } catch {
     if (!lastLoad) note.textContent = "Couldn't load station data. Reload the page to try again."; // refresh failures keep old data
