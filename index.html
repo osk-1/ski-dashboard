@@ -104,7 +104,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
   .legend button { display: inline-block; flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--muted); font: 600 .8rem/1 var(--body); cursor: pointer; }
 }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
-.legend i.b { box-shadow: inset 0 0 0 1px var(--line); } /* the near-white <1 cm band */
+.legend i.b { box-shadow: inset 0 0 0 1px var(--line); } /* the <1 cm band is transparent on the map: empty box */
 .tablebox { overflow-x: auto; }
 summary { list-style: none; display: flex; align-items: center; cursor: pointer; }
 summary::-webkit-details-marker { display: none; }
@@ -324,19 +324,19 @@ const nsDraw = url => new Promise((ok, no) => { const im = new Image(); im.cross
 const nsPng = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
   const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); ok({ W: im.width, H: im.height, d: g.getImageData(0, 0, im.width, im.height).data }); } catch (e) { no(e); } }; im.src = url; });
 function nsClick(e) { // value of the new-snow PNG under the click, as a pin with a tooltip
-  if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive,.pl")) return; // stations, their value tags and landmark labels are not map spots
+  if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive")) return; // stations and their value tags are not map spots
   const url = nsUrl(nsRange().dataOverlayURL, nsEnd), cur = nsCur();
   (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (!nsOv || nsCur() !== cur) return; // the selection moved on while this loaded
     const B = nsCfg.boundingBoxes.find(b => b.lambert).lambert, [x, y] = lambert(e.latlng.lat, e.latlng.lng), col = Math.floor((x - B[0]) / ((B[2] - B[0]) / W)), row = Math.floor((B[3] - y) / ((B[3] - B[1]) / H));
     nsPin?.remove(); nsPin = L.circleMarker(e.latlng, { pane: "places", radius: 8, interactive: false, color: css("--fg"), weight: 2, fillOpacity: 0 }).addTo(map)
-      .bindTooltip(`<b title="1 km average">${col >= 0 && col < W && row >= 0 && row < H ? d[(row * W + col) * 4] + " cm" : "–"}</b>`, { permanent: true, direction: "right", offset: [8, 0], className: "val" }); },
+      .bindTooltip(`<b>${col >= 0 && col < W && row >= 0 && row < H ? `+${d[(row * W + col) * 4]} cm (${esc(nsRange().timeRange)} h)` : "–"}</b>`, { permanent: true, direction: "right", offset: [8, 0], className: "val" }); },
     () => { delete nsImg[url]; });
 }
 function nsShow() {
   const url = nsCur(); if (nsOv) return;
   (nsImg[url] ??= nsDraw(url)).then(src => { if (nsOv || !lay.on.newsnow || nsCur() !== url) return; // the selection moved on while this loaded
     nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .55, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
-    () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); } });
+    () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); renderMap(); } });
 }
 function initMap() {
   mapDiv.innerHTML = "";
@@ -416,7 +416,7 @@ function renderMap() {
   if (nsPin && !nsOv) { nsPin.remove(); nsPin = null; }
   if (lay.on.newsnow && !nsErr) nsCfg ? nsShow() : nsBusy || nsLoad();
   if (lay.on.newsnow && nsCfg && !nsErr) lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>New snow (${esc(nsRange().timeRange)} h):</span>` +
-    nsCfg.thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${esc(color)}"></i><span>${esc(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi)}<span class="cm"> cm</span></span>`).join("") + `<span class="ph">cm</span></span>`);
+    nsCfg.thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi)}<span class="cm"> cm</span></span>`).join("") + `<span class="ph">cm</span></span>`);
   // Label layout at the fitted view, in map pixels. Landmark labels move beside/above/below their symbol to clear station
   // dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
   const size = map.getSize(), origin = fitCenter.subtract(size.divideBy(2)), at = (lat, lon) => map.project([lat, lon], fitZ).subtract(origin);
