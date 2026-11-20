@@ -9,7 +9,7 @@ Writes:
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
 """
-import json, os, sys, urllib.request
+import gzip, json, os, sys, urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -21,7 +21,12 @@ STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc6
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
-TAWES = {"11311": ("St. Anton (Tal)", 1304, "snow"), "11110": ("Galzig", 2079, "wind")}  # GeoSphere TAWES id: (name, altitude m, type)
+TAWES = {"11311": ("St. Anton (Tal)", 1304, "snow"), "11110": ("Galzig", 2079, "wind"), "11307": ("Langen/Arlberg", 1221, "snow")}  # GeoSphere TAWES id: (name, altitude m, type)
+VOR = "https://lawinen.at/smet/vor/"  # LWD Vorarlberg station feed (what at-08.lawinen-warnung.eu's station map reads)
+VOR_IDS = {"ZURS1": "snow", "LECA1": "snow", "LECH1": "snow", "LANG1": "snow", "ALBO2": "snow", "VALL1": "wind"}  # shortName: type
+BULLETINS = {"Euregio avalanche.report": "https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json",
+             # 404 until LWD Vorarlberg publishes the season's first bulletin (usually early December)
+             "LWD Vorarlberg": "https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json"}
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
 
 
@@ -64,6 +69,31 @@ def station(f):
         "wr": num(p.get("WR")),
         "date": p.get("date"),
     }
+
+
+def vor_station(f):
+    """Vorarlberg feature -> station dict. Units there: HS/HSD_24 m, TA K, VW/VW_MAX m/s."""
+    p, c = f["properties"], f["geometry"]["coordinates"]
+    scale = lambda k, x: None if p.get(k) is None else p[k] * x
+    return {"id": "VOR-" + p["shortName"], "uuid": f["id"], "name": p["name"], "region": p.get("microRegionID"),
+            "type": VOR_IDS[p["shortName"]], "lon": round(c[0], 5), "lat": round(c[1], 5), "alt": int(c[2]),
+            "hs": depth(scale("HS", 100)), "n24": None, "hsd24": num(scale("HSD_24", 100)),  # PSUM_24 is rain+snow water, not new snow
+            "lt": None if p.get("TA") is None else num(p["TA"] - 273.15),
+            "wg": num(scale("VW", 3.6)), "wg_boe": num(scale("VW_MAX", 3.6)), "wr": num(p.get("DW")),
+            "date": datetime.fromisoformat(p["date"]).astimezone(TZ).isoformat()}
+
+
+def smet_hs(text, slot_times):
+    """{local slot key: HS cm} from a SMET file (UTC ISO timestamps, HS in m)."""
+    head, _, data = text.partition("[DATA]")
+    hdr = {k.strip(): v.strip() for k, _, v in (l.partition("=") for l in head.splitlines()) if v}
+    i, nodata = hdr["fields"].split().index("HS"), float(hdr.get("nodata", -999))
+    want = {t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"): t.strftime("%Y-%m-%dT%H") for t in slot_times}
+    out = {}
+    for r in (l.split() for l in data.splitlines()):
+        if r and r[0] in want and float(r[i]) != nodata:
+            out[want[r[0]]] = depth(float(r[i]) * 100)
+    return out
 
 
 def parse_tawes(gj, names):
@@ -191,6 +221,13 @@ def main(days):
         stations += parse_tawes(get_json(GEO + "current/" + q), TAWES)
     except Exception as e:
         print("GeoSphere TAWES failed:", e, file=sys.stderr)
+    try:  # secondary source: a failure must not abort the run
+        vor = [vor_station(f) for f in get_json(VOR + "stations_vor.geojson")["features"] if f["properties"].get("shortName") in VOR_IDS]
+        stations += vor
+        for m in set(VOR_IDS) - {x["id"][4:] for x in vor}:
+            print("station missing from Vorarlberg feed:", m, file=sys.stderr)
+    except Exception as e:
+        print("Vorarlberg stations failed:", e, file=sys.stderr)
     by_uuid = {s["uuid"]: s["id"] for s in stations if s["type"] == "snow"}
 
     os.makedirs("data", exist_ok=True)
@@ -199,7 +236,9 @@ def main(days):
             readings = json.load(fh)
     except FileNotFoundError:
         readings = {}
-    for s in slots(days, now):
+    sl = slots(days, now)
+    iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
+    for s in sl:
         try:
             feats = get_json(snapshot_url(s))["features"]
         except Exception as e:
@@ -210,15 +249,23 @@ def main(days):
         slot["t"] = s.isoformat()
         slot["hs"].update(hs)  # merge: keep other sources' ids (TAWES)
     try:  # TAWES snow height at the slot times, one historical request
-        sl = slots(days, now)
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
         gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE&station_ids=" + ",".join(
             i for i, v in TAWES.items() if v[2] == "snow") + f"&start={u(sl[0])}&end={u(now)}")
-        iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
         for k, hs in tawes_history(gj, list(iso)).items():
             readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"].update(hs)
     except Exception as e:
         print("TAWES history failed:", e, file=sys.stderr)
+    for st in stations:  # Vorarlberg snow history: last 7 days of 5-min values per station
+        if st["id"].startswith("VOR-") and st["type"] == "snow":
+            try:
+                req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    txt = gzip.decompress(r.read()).decode()
+                for k, cm in smet_hs(txt, sl).items():
+                    readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"][st["id"]] = cm
+            except Exception as e:
+                print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
     with open("data/readings.json", "w") as fh:
         json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
 
@@ -233,13 +280,20 @@ def main(days):
         fsrc = fc["source"]
     except Exception as e:
         print("forecast failed:", e, file=sys.stderr)
-    try:  # secondary source: a failure must not abort the run
-        ids = {s["region"].split()[0] for s in stations if s.get("region")}
-        regions = parse_danger(get_json("https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json"), ids)
+    ids = {s["region"].split()[0] for s in stations if s.get("region")}
+    try:  # a bulletin that fails keeps its regions from the last run
+        with open("data/danger.json") as fh:
+            regions = {k: v for k, v in json.load(fh)["regions"].items() if k in ids}
+    except (FileNotFoundError, KeyError, ValueError):
+        regions = {}
+    for name, url in BULLETINS.items():  # secondary sources: a failure must not abort the run
+        try:
+            regions.update(parse_danger(get_json(url), ids))
+        except Exception as e:
+            print("avalanche bulletin failed:", name, e, file=sys.stderr)
+    if regions:
         with open("data/danger.json", "w") as fh:
-            json.dump({"source": "Euregio avalanche.report", "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
-    except Exception as e:
-        print("avalanche bulletin failed:", e, file=sys.stderr)
+            json.dump({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
     print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fsrc}")
 
 
@@ -278,6 +332,17 @@ def selftest():
     assert (g["id"], g["type"], g["hs"], g["wg"], g["wg_boe"], g["wr"], g["lt"], g["alt"]) == ("TAWES-11110", "wind", None, 19.8, 34.6, 273.0, -2.1, 2079)
     assert (a["type"], a["hs"], a["wg"]) == ("snow", 0.0, 0.7)
     assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {"2026-11-19T07": {"TAWES-11311": 0.0}}  # 06:00 UTC = 07:00 CET; Galzig has no snow
+    vf = {"id": "v", "geometry": {"coordinates": [10.170777, 47.173592, 1920]}, "properties": {
+        "shortName": "ZURS1", "name": "Zürs Hexenboden", "microRegionID": "AT-08-03-01", "HS": 0.22, "HSD_24": 0.07,
+        "TA": 271.9, "VW": 9.9, "VW_MAX": 20.1, "DW": 237, "date": "2026-11-20 09:00:00+00:00"}}
+    v = vor_station(vf)
+    assert (v["id"], v["type"], v["hs"], v["hsd24"], v["lt"], v["wg"], v["wg_boe"], v["wr"], v["alt"], v["region"]) == \
+        ("VOR-ZURS1", "snow", 22.0, 7.0, -1.2, 35.6, 72.4, 237.0, 1920, "AT-08-03-01")
+    assert v["date"] == "2026-11-20T10:00:00+01:00"
+    assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A", "date": "2026-11-20 09:00:00+00:00"}})["lt"] is None
+    smet = ("SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS PSUM\n[DATA]\n"
+            "2026-11-19T06:00:00Z 270.1 0.15 0.0\n2026-11-19T11:00:00Z 271.0 -999 0.0\n2026-11-19T16:00:00Z 270.0 -0.01 0.0\n")
+    assert smet_hs(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {"2026-11-19T07": 15.0, "2026-11-19T17": 0.0}
     print("selftest ok")
 
 
