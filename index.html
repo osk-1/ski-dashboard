@@ -297,8 +297,7 @@ function renderMap() {
     const dir = spot.dir, offset = spot.off;
     const m = L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : wo ? css("--wind") : css("--panel"), fillColor: wo ? css("--panel") : snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
     m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
-    m.on("click", () => select(s.id));
-    m.getTooltip().on("click", () => select(s.id));
+    m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
     t.textContent = `${s.name} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
     el.append(t);
