@@ -272,7 +272,7 @@ try { const j = JSON.parse(localStorage.getItem("layers")); if (j) { if (typeof 
 const vis = s => lay.on[catOf(s)] && !lay.hide.includes(s.id); // dot, label, table row, summary
 const arrowVis = s => arrowOn(s) && s.type !== "wind" && lay.on.wind && !lay.hide.includes(s.id); // small wind arrow above a snow/weather dot
 const shown = () => state.stations.filter(vis);
-for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phone() || k === "snow" || k === "peaks"; // defaults: phone shows snow only; a saved choice wins
+for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phone() || k === "snow"; // defaults: phone shows snow only; a saved choice wins
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
@@ -361,7 +361,7 @@ function renderMap() {
     if (lm.pk) { map[lay.on.peaks ? "addLayer" : "removeLayer"](lm.marker); if (!lay.on.peaks) continue; }
     const { x, y } = at(lm.lat, lm.lon), len = lm.name.length * 7;
     const sides = [["", [x - 6, y - 9, x + 14 + len, y + 9]], ["l", [x - 14 - len, y - 9, x + 6, y + 9]], ["d", [x - 6, y - 5, x + 6 + len, y + 22]], ["u", [x - 6, y - 22, x + 6 + len, y + 5]]];
-    const [side, box] = sides.reduce((best, c) => costAgainst(stationBoxes, c[1]) < costAgainst(stationBoxes, best[1]) ? c : best);
+    const [side, box] = sides.reduce((best, c) => costAgainst(taken, c[1]) < costAgainst(taken, best[1]) ? c : best);
     lm.marker.getElement().firstChild.className = lm.marker.getElement().firstChild.className.replace(/ (l|d|u)$/, "") + (side && " " + side);
     taken.push(box);
   }
