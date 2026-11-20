@@ -86,6 +86,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .pl.d { flex-direction: column; align-items: flex-start; gap: 2px; top: -5px; }
 #map .pl.u { flex-direction: column-reverse; align-items: flex-start; gap: 2px; top: auto; bottom: -5px; }
 #map .pl.pk { color: var(--muted); font-weight: 400; }
+#map:not(.zin) .pl.pk { display: none; } /* peaks are dense: only once zoomed in */
 #map .pl.pk i { width: 12px; height: 11px; background: var(--muted); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
 .legend svg { vertical-align: middle; }
@@ -327,7 +328,7 @@ function initMap() {
     const r = state.danger.regions[f.properties.id], c = DGC[Math.max(0, ...(r?.ratings.map(x => x.level) || []))], old = !r || new Date(r.valid_end) < new Date();
     return { color: c, weight: 1, opacity: old ? .35 : .8, fillColor: c, fillOpacity: old ? .12 : .4 }; } });
   new Layers({ position: "topright" }).addTo(map);
-  const names = () => mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5);
+  const names = () => { mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5); mapDiv.classList.toggle("zin", map.getZoom() >= fitZ + 1); };
   map.on("zoomend", names); names();
 }
 
