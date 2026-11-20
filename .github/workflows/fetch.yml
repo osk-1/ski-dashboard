@@ -85,7 +85,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           mkdir _site
-          cp -r index.html manifest.webmanifest icons data _site/
+          cp -r index.html lib.js app.js manifest.webmanifest icons data _site/
       - if: steps.gate.outputs.run == 'true'
         uses: actions/upload-pages-artifact@v4
         with:
