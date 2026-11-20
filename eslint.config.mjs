@@ -13,7 +13,7 @@ export default [
     languageOptions: { sourceType: "script", globals: { ...globals.browser, L: "readonly", Chart: "readonly", module: "readonly" } },
     rules: { "no-empty": ["error", { allowEmptyCatch: true }] }, // storage access is wrapped in try { ... } catch {}
   },
-  { files: ["app.js"], languageOptions: { globals: Object.fromEntries(["STEPS", "band", "hasWind", "arrowOn", "lambert", "esc"].map((n) => [n, "readonly"])) } }, // from lib.js
+  { files: ["app.js"], languageOptions: { globals: Object.fromEntries(["STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "slice", "latest", "extreme", "refroze"].map((n) => [n, "readonly"])) } }, // from lib.js
   {
     files: ["**/*.mjs", "**/*.js"],
     ignores: ["app.js", "lib.js"],

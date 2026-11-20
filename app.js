@@ -9,9 +9,11 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
 const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
 
-let state = { stations: [], readings: [], forecast: null, danger: null, regions: null, selected: null };
+let state = { stations: [], readings: [], forecast: null, danger: null, regions: null, hourly: null, selected: null };
+let condH = 24;
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
+try { const v = +localStorage.getItem("condH"); if ([1, 6, 12, 24, 48, 72, 168].includes(v)) condH = v; } catch {}
 
 function delta24(id) {
   const r = state.readings; if (r.length < 2) return null;
@@ -296,6 +298,7 @@ function renderCharts() {
   const s = state.stations.find(x => x.id === state.selected);
   if (!s || typeof Chart === "undefined") return;
   chartDefaults();
+  renderCond(s);
   const accent = css("--accent"), soft = css("--accent-soft");
   const wind = s.type === "wind", warm = css("--wind"), dim = c => `color-mix(in srgb, ${c} 45%, transparent)`;
   const col = k => state.readings.map(r => r[k]?.[s.id] ?? null);
@@ -308,7 +311,7 @@ function renderCharts() {
   const labels = [...hist.map(p => p.x), ...proj.map(p => p.x)];
   const pad = a => [...a, ...proj.map(() => null)];
   const has = a => a.some(v => v != null), hasT = has(lt), hasW = has(wg);
-  const ln = (label, data, c, o = {}) => ({ label, data: pad(data), borderColor: c, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, spanGaps: true, /* eslint-disable-line no-restricted-syntax -- shortcut: draws across gaps today; remove with #40/#42 */ tension: .25, ...o });
+  const ln = (label, data, c, o = {}) => ({ label, data: pad(data), borderColor: c, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, spanGaps: false, tension: .25, ...o });
   // arrows sit on y=0 pointing where the wind blows to, same rotation as the map arrows; calm/unknown -> no point
   const arrowImg = to => { const c = document.createElement("canvas"); c.width = c.height = 18; const x = c.getContext("2d"); x.translate(9, 9); x.scale(.85, .85); x.rotate(to * Math.PI / 180); x.fillStyle = warm; x.fill(new Path2D("M0-10L6 2H2.5V10H-2.5V2H-6Z")); return c; };
   const step = Math.ceil(wr.length / 40); // thin out so arrows do not overlap
@@ -352,8 +355,77 @@ function renderCharts() {
   document.getElementById("fcSource").textContent = `Under each day: min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
 }
 
+const fmtHour = (t, day) => new Date(t).toLocaleString("en-GB", { ...(day ? { weekday: "short", day: "numeric" } : { hour: "2-digit", minute: "2-digit" }), timeZone: "Europe/Vienna" });
+const srcOf = id => id.startsWith("TAWES-") ? "GeoSphere Austria" : id.startsWith("VOR-") ? "LWD Vorarlberg" : "LWD Tirol";
+
+// Conditions: the station's hourly series, -X ... now (measured) ... +X (model), or the latest values for 1 h
+function renderCond(s) {
+  const hours = state.hourly?.hours || {}, id = s.id, el = i => document.getElementById(i);
+  for (const b of el("condWin").children) b.setAttribute("aria-pressed", +b.dataset.h === condH);
+  el("condTitle").textContent = `Conditions · ${s.name}`;
+  charts.cond?.destroy(); charts.cond = null;
+  const any = f => Object.values(hours).some(h => h[f]?.[id] != null);
+  const gauge = /^(TAWES|VOR)-/.test(id), pf = gauge ? "pr" : "hr", hasOft = any("oft");
+  const lines = [["lt", "Air", "°C"], ...(hasOft ? [["oft", "Snow surface", "°C"]] : []), ["rh", "Humidity", "%"], [pf, gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm"]];
+  const has = Object.values(hours).some(h => Object.entries(h).some(([f, m]) => f !== "flags" && m[id] != null));
+  el("condBox").hidden = el("condNow").hidden = el("condWin").parentNode.hidden = !has;
+  if (!has) { el("condNote").textContent = "No hourly data for this station."; return; }
+  const now = anchorMs(hours, Date.now()), m = state.hourly.model || {};
+  const modelSrc = `model · ${m.source || "source unknown"}${m.issued ? ", issued " + fmtSlot(m.issued) : ""}`;
+  el("condBox").hidden = condH === 1; el("condNow").hidden = condH !== 1; el("condRh").parentNode.hidden = condH === 1;
+  if (condH === 1) {
+    el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now);
+      return `<div class="stat"><b>${v ? `${v.y} ${u}` : "–"}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}</small></div>`; }).join("");
+    el("condNote").textContent = `Latest measured values (${srcOf(id)}), with their measurement times.`;
+    return;
+  }
+  const from = now - condH * 3600e3, to = now + condH * 3600e3, past = f => slice(hours, f, id, from, now), fut = f => slice(hours, f, id, now + 1, to);
+  const nn = a => a.some(p => p.y != null);
+  const warm = css("--wind"), accent = css("--accent"), rain = css("--snow-2"), rainM = css("--snow-3"), muted = css("--muted");
+  const ln = (f, label, unit, c, o = {}) => ({ label, unit, src: `measured · ${srcOf(id)}`, data: past(f), borderColor: c, backgroundColor: c, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
+  const lt = ln("lt", "Air", "°C", warm), mt = { ...ln("mt", "Air · model", "°C", warm, { borderDash: [5, 4], borderWidth: 1.5, src: modelSrc }), data: fut("mt") };
+  const oft = hasOft && ln("oft", "Snow surface", "°C", accent);
+  const rh = el("condRh").checked && ln("rh", "Humidity", "%", muted, { borderWidth: 1, yAxisID: "yH" });
+  const bar = (label, unit, data, o) => ({ type: "bar", label, unit, data, yAxisID: "yP", order: 2, barPercentage: 1, categoryPercentage: .8, ...o });
+  const pr = bar(gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm", past(pf), { backgroundColor: rain, src: `measured · ${srcOf(id)}` });
+  const pm = bar("Precip. · model", "mm", fut("pm").map(p => ({ ...p, sm: hours[p.k]?.sm?.[id] })), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, src: modelSrc });
+  const hasModel = nn(mt.data) || nn(pm.data);
+  const sets = [lt, oft, rh, mt, pr, pm].filter(d => d && (d === lt || nn(d.data)));
+  const zone = { id: "zone", beforeDatasetsDraw(c) { // shaded forecast zone after "now"
+    const { ctx, chartArea: a, scales: { x } } = c, px = Math.max(a.left, Math.min(a.right, x.getPixelForValue(now)));
+    ctx.save(); ctx.fillStyle = css("--accent-soft"); ctx.globalAlpha = .5; ctx.fillRect(px, a.top, a.right - px, a.bottom - a.top);
+    ctx.globalAlpha = 1; ctx.strokeStyle = muted; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom); ctx.stroke();
+    ctx.fillStyle = muted; ctx.font = `11px ${css("--body")}`; ctx.fillText("now", px + 4, a.top + 11); ctx.restore(); } };
+  const step = { 6: 2, 12: 4, 24: 12, 48: 24, 72: 24, 168: 24 }[condH] * 3600e3;
+  const zero = { color: c => c.tick.value === 0 ? css("--fg") : css("--line"), lineWidth: c => c.tick.value === 0 ? 1.5 : 1 };
+  el("cond").setAttribute("aria-label", `Conditions chart, ${condH} hours either side of now`);
+  charts.cond = new Chart(el("cond"), {
+    type: "line", data: { datasets: sets }, plugins: [zone],
+    options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearest", axis: "x", intersect: false },
+      plugins: { legend: { labels: { boxWidth: 14, boxHeight: 8, font: { size: 11 } } },
+        tooltip: { filter: i => i.parsed.y != null, callbacks: { title: it => fmtSlot(it[0].parsed.x),
+          label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.sm != null ? ` (snow ${c.raw.sm} cm)` : ""}`,
+          footer: it => [...new Set(it.map(i => i.dataset.src))] } } },
+      scales: {
+        x: { type: "linear", min: from, max: to, grid: { display: false },
+          afterBuildTicks: ax => { ax.ticks = []; for (let t = Math.ceil(from / 3600e3) * 3600e3; t <= to; t += 3600e3) if (keyMs(viennaKey(t)) === t && (+viennaKey(t).slice(11) * 3600e3) % step === 0) ax.ticks.push({ value: t }); },
+          ticks: { maxRotation: 0, font: { size: 11 }, callback: v => viennaKey(v).endsWith("T00") ? fmtHour(v, true) : fmtHour(v) } },
+        y: { title: { display: true, text: "°C" }, grid: zero, grace: "5%" },
+        ...(nn(pr.data) || nn(pm.data) ? { yP: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: gauge ? "mm" : "cm / mm" } } } : {}),
+        ...(rh && nn(rh.data) ? { yH: { position: "right", min: 0, max: 100, grid: { display: false }, title: { display: true, text: "%" } } } : {}) } },
+  });
+  const t = (v, u = "°C") => `${v.y} ${u} at ${fmtHour(keyMs(v.k))}`, ltp = past("lt");
+  const n = extreme(ltp, true), d = extreme(ltp, false), fr = hasOft && refroze(past("oft"));
+  el("condNote").textContent = [
+    n ? `Overnight min (18–08 h): ${t(n.at)} (${n.pts.length} of ${n.of} h with data).` : "No overnight air temperature in this window.",
+    d ? `Daytime max (08–18 h): ${t(d.at)} (${d.pts.length} of ${d.of} h with data).` : "No daytime air temperature in this window.",
+    ...(hasOft ? [fr ? (fr.ok ? `Snow surface refroze overnight (below 0 °C in all ${fr.pts.length} hours with data).` : `Snow surface didn't refreeze overnight (${t(fr.warm)}).`) : "No overnight snow surface data in this window."] : []),
+    hasModel ? `Dashed / outlined: ${modelSrc}.` : "Model unavailable.",
+  ].join(" ");
+}
+
 // touch: drop the tooltip when the finger lifts; click comes last, after the emulated mousemove that would re-show it (listener on the canvas, which survives chart re-creation)
-for (const ev of ["pointerup", "touchend", "click"]) document.getElementById("hist").addEventListener(ev, e => { const c = charts.hist; if (!c || e.pointerType === "mouse" || (e.type === "click" && !e.pointerType)) return; setTimeout(() => { if (c !== charts.hist) return; c.setActiveElements([]); c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update(); }, 50); }); // after Chart.js's own (rAF-throttled) event handling
+for (const cid of ["hist", "cond"]) for (const ev of ["pointerup", "touchend", "click"]) document.getElementById(cid).addEventListener(ev, e => { const c = charts[cid]; if (!c || e.pointerType === "mouse" || (e.type === "click" && !e.pointerType)) return; setTimeout(() => { if (c !== charts[cid]) return; c.setActiveElements([]); c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update(); }, 50); }); // after Chart.js's own (rAF-throttled) event handling
 
 function renderAll() { renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); }
 
@@ -363,6 +435,9 @@ function select(id) {
   renderMap(); renderTable(); renderCharts();
 }
 document.getElementById("stnSel").addEventListener("change", e => select(e.target.value));
+document.getElementById("condWin").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; condH = +b.dataset.h; try { localStorage.setItem("condH", condH); } catch {} condRedraw(); });
+document.getElementById("condRh").addEventListener("change", () => condRedraw());
+function condRedraw() { const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") renderCond(s); }
 for (const ev of ["click", "keydown"]) document.addEventListener(ev, e => {
   if (ev === "keydown" && e.key !== "Enter" && e.key !== " ") return;
   const el = e.target.closest("[data-id]");
@@ -388,10 +463,10 @@ async function load() {
   loading = true;
   const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
   try {
-    const [st, fc, rd, dg, rg] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null), get("regions").catch(() => null)]);
+    const [st, fc, rd, dg, rg, hr] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null)]);
     state.danger = dg; state.regions = rg;
     state.stations = st.stations || [];
-    state.forecast = fc;
+    state.forecast = fc; state.hourly = hr;
     state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
     if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;
