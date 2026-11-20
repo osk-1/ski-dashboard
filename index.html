@@ -285,7 +285,7 @@ const shown = () => state.stations.filter(vis);
 for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phone() || k === "snow"; // defaults: phone shows snow only; a saved choice wins
 lay.on.newsnow ??= false; lay.nsh ??= 24; // off everywhere: it fetches extra images
 // New-snow overlay (avalanche.report): config loaded on first enable; nsEnd = selected period end (ms, UTC); nsImg caches url -> reprojected data URL
-let nsCfg, nsEnd, nsErr, nsBusy, nsOv; const nsImg = {};
+let nsCfg, nsEnd, nsErr, nsBusy, nsOv, nsPin; const nsImg = {};
 const NS_ATTR = 'New snow: <a href="https://avalanche.report" target="_blank" rel="noopener">GeoSphere Austria via avalanche.report</a>';
 const nsRange = () => nsCfg.timeRanges.find(r => r.timeRange === lay.nsh) || nsCfg.timeRanges[0];
 const nsUrl = (tpl, end) => { const d = new Date(end).toISOString(); return tpl.replace("https://wiski.tirol.gv.at/lawine/", "https://static.avalanche.report/").replaceAll("$year", d.slice(0, 4)).replaceAll("$date", d.slice(0, 10)).replaceAll("$hour", d.slice(11, 13)); };
@@ -306,7 +306,7 @@ function nsPanel() {
   if (!lay.on.newsnow || !nsCfg) { x.innerHTML = ""; return; }
   const ma = Date.parse(nsRange().maxAnalysisTimestamp), ends = nsEnds(), opt = t => `<option value="${t}"${t === nsEnd ? " selected" : ""}>${esc(fmtSlot(t))}</option>`;
   x.innerHTML = `<label><span>Period</span><select data-ns="h">${nsCfg.timeRanges.map(r => `<option value="${esc(r.timeRange)}"${r === nsRange() ? " selected" : ""}>${esc(r.timeRange)} h</option>`).join("")}</select></label>` +
-    `<label><span>Until</span><select data-ns="t"><optgroup label="Forecast">${ends.filter(t => t > ma).map(opt).join("")}</optgroup><optgroup label="Past">${ends.filter(t => t <= ma).map(opt).join("")}</optgroup></select></label>`;
+    `<label><span>Until</span><select data-ns="t">${[["Forecast", t => t > ma], ["Past", t => t <= ma]].map(([l, f]) => ends.some(f) ? `<optgroup label="${l}">${ends.filter(f).map(opt).join("")}</optgroup>` : "").join("")}</select></label>`;
   if (f) x.querySelector(`[data-ns="${f}"]`)?.focus();
 }
 // GIF in Austria Lambert -> canvas over 3x the map's maxBounds (the view is wider than them, and can zoom out a step), sampled linearly in Web Mercator because L.imageOverlay stretches linearly there
@@ -320,10 +320,22 @@ const nsDraw = url => new Promise((ok, no) => { const im = new Image(); im.cross
     if (col >= 0 && col < W && row >= 0 && row < H) out.data.set(src.subarray((row * W + col) * 4, (row * W + col) * 4 + 4), (j * w + i) * 4);
   }
   og.putImageData(out, 0, 0); ok(o.toDataURL()); } catch (e) { no(e); } }; im.src = url; });
+// 1 km PNG (R = cm) -> its R channel, cached by url like the GIF
+const nsPng = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
+  const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); ok({ W: im.width, H: im.height, d: g.getImageData(0, 0, im.width, im.height).data }); } catch (e) { no(e); } }; im.src = url; });
+function nsClick(e) { // value of the new-snow PNG under the click, as a pin with a tooltip
+  if (!nsOv) return;
+  const url = nsUrl(nsRange().dataOverlayURL, nsEnd), cur = nsCur();
+  (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (!nsOv || nsCur() !== cur) return; // the selection moved on while this loaded
+    const B = nsCfg.boundingBoxes.find(b => b.lambert).lambert, [x, y] = lambert(e.latlng.lat, e.latlng.lng), col = Math.floor((x - B[0]) / ((B[2] - B[0]) / W)), row = Math.floor((B[3] - y) / ((B[3] - B[1]) / H));
+    nsPin?.remove(); nsPin = L.circleMarker(e.latlng, { pane: "places", radius: 8, interactive: false, color: css("--fg"), weight: 2, fillOpacity: 0 }).addTo(map)
+      .bindTooltip(`<b title="1 km average">${col >= 0 && col < W && row >= 0 && row < H ? d[(row * W + col) * 4] + " cm" : "–"}</b>`, { permanent: true, direction: "right", offset: [8, 0], className: "val" }); },
+    () => { delete nsImg[url]; });
+}
 function nsShow() {
   const url = nsCur(); if (nsOv) return;
   (nsImg[url] ??= nsDraw(url)).then(src => { if (nsOv || !lay.on.newsnow || nsCur() !== url) return; // the selection moved on while this loaded
-    nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .7, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
+    nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .55, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
     () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); } });
 }
 function initMap() {
@@ -384,7 +396,7 @@ function initMap() {
     return { color: c, weight: 1, opacity: old ? .35 : .8, fillColor: c, fillOpacity: old ? .12 : .4 }; } });
   new Layers({ position: "topright" }).addTo(map);
   const names = () => { mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5); mapDiv.classList.toggle("zin", map.getZoom() >= fitZ + 1); };
-  map.on("zoomend", names); names();
+  map.on("zoomend", names); names(); map.on("click", nsClick);
 }
 
 function renderMap() {
@@ -401,8 +413,9 @@ function renderMap() {
   for (const [k] of CATS) { map[lay.on[k] ? "addLayer" : "removeLayer"](groups[k]); groups[k].clearLayers(); }
   map[lay.on.danger && dangerOk ? "addLayer" : "removeLayer"](dangerLayer);
   if (nsOv && !(lay.on.newsnow && nsOv.url === nsCur())) { nsOv.remove(); nsOv = null; }
+  if (nsPin && !nsOv) { nsPin.remove(); nsPin = null; }
   if (lay.on.newsnow && !nsErr) nsCfg ? nsShow() : nsBusy || nsLoad();
-  if (lay.on.newsnow && nsCfg) lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>New snow (${esc(nsRange().timeRange)} h):</span>` +
+  if (lay.on.newsnow && nsCfg && !nsErr) lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>New snow (${esc(nsRange().timeRange)} h):</span>` +
     nsCfg.thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${esc(color)}"></i><span>${esc(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi)}<span class="cm"> cm</span></span>`).join("") + `<span class="ph">cm</span></span>`);
   // Label layout at the fitted view, in map pixels. Landmark labels move beside/above/below their symbol to clear station
   // dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
@@ -444,10 +457,10 @@ function renderMap() {
     const spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW); // the selected station always keeps its name, even if it must overlap
     taken.push(spot.box);
     const dir = spot.dir, offset = spot.off;
-    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", e => select(shown().reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(grp); // overlapping pads: pick the station nearest the tap // 44px touch target
+    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0, bubblingMouseEvents: false }).on("click", e => select(shown().reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(grp); // overlapping pads: pick the station nearest the tap // 44px touch target
     // wind-only: just the arrow (or a calm ring) centred in a 44px box, haloed when selected; snow stations keep the coloured dot
     const m = wo ? L.marker([s.lat, s.lon], { keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [44, 44], iconAnchor: [22, 22], html: `<svg width="44" height="44" viewBox="-22 -22 44 44"><circle r="13" fill="${sel ? css("--panel") : "transparent"}"${sel ? ` stroke="${css("--fg")}" stroke-width="3"` : ""}/>${arrowOn(s) ? arrow(0, 0, (s.wr + 180) % 360, css("--wind")) : `<circle r="4.5" fill="${css("--panel")}" stroke="${css("--wind")}" stroke-width="2"/>`}</svg>` }) }).addTo(grp)
-      : L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1 }).addTo(grp);
+      : L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1, bubblingMouseEvents: false }).addTo(grp);
     m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
     m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
