@@ -276,8 +276,8 @@ function initMap() {
 function renderMap() {
   const snow = i => i < 0 ? css("--line") : css(`--snow-${i}`);
   const lg = document.getElementById("legend");
-  lg.innerHTML = `<span class="ls">Snow<span class="cm"> height</span>: ` +
-    ["&lt;10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l}<span class="cm"> cm</span>`).join(" ") +
+  lg.innerHTML = `<span class="ls"><span>Snow<span class="cm"> height</span>:</span>` +
+    ["&lt;10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i><span>${l}<span class="cm"> cm</span></span>`).join("") +
     `<span class="ph">cm</span></span><button type="button" aria-label="Wind legend" aria-expanded="${lg.classList.contains("open")}">?</button>` +
     `<span class="sep">·</span><span class="wx"><svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station</span>`;
   if (typeof L === "undefined") { mapDiv.innerHTML = '<div class="empty">Map unavailable.</div>'; return; }
@@ -322,7 +322,7 @@ function renderMap() {
     const spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW); // the selected station always keeps its name, even if it must overlap
     taken.push(spot.box);
     const dir = spot.dir, offset = spot.off;
-    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", () => select(s.id)).addTo(stnLayer); // 44px touch target
+    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", e => select(state.stations.reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(stnLayer); // overlapping pads: pick the station nearest the tap // 44px touch target
     const m = L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : wo ? css("--wind") : css("--panel"), fillColor: wo ? css("--panel") : snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
     m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
     m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
