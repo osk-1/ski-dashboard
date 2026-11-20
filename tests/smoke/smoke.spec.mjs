@@ -1,0 +1,48 @@
+/* global Chart */
+import { readFileSync } from "node:fs";
+import { expect, test } from "@playwright/test";
+
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const fixture = (name) => readFileSync(new URL(`../fixtures/data/${name}.json`, import.meta.url));
+
+// iPhone 13 / 13 Pro Max widths
+const VIEWPORTS = [{ name: "390", width: 390, height: 844 }, { name: "430", width: 430, height: 932 }];
+
+for (const vp of VIEWPORTS) {
+  for (const scheme of ["light", "dark"]) {
+    test(`loads cleanly at ${vp.name}px, ${scheme}`, async ({ browser }, testInfo) => {
+      const context = await browser.newContext({ viewport: vp, colorScheme: scheme, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+      const page = await context.newPage();
+      const problems = [];
+      page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
+      page.on("pageerror", (e) => problems.push(`exception: ${e.message}`));
+
+      // No live data, no live tiles: fixtures for data/, a blank tile, empty font CSS. The CDN scripts load for real, so their SRI hashes are checked.
+      await page.route("**/data/*.json", (route) => route.fulfill({ contentType: "application/json", body: fixture(new URL(route.request().url()).pathname.match(/(\w+)\.json$/)[1]) }));
+      await page.route(/^https?:\/\/(?!127\.0\.0\.1|cdnjs\.cloudflare\.com)/, (route) => {
+        const url = route.request().url();
+        if (url.includes("arcgisonline")) return route.fulfill({ contentType: "image/png", body: PNG });
+        if (url.includes("fonts.googleapis")) return route.fulfill({ contentType: "text/css", body: "" });
+        return route.abort();
+      });
+
+      await page.goto("/index.html");
+      await expect(page.locator("#updated")).toContainText("stations"); // data loaded
+      await expect(page.locator("#map .leaflet-container, #map.leaflet-container")).toBeVisible();
+      await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible(); // station dots
+
+      // select a station (the select works at every width) and check both charts draw
+      const options = await page.locator("#stnSel option").evaluateAll((o) => o.map((x) => x.value));
+      await page.selectOption("#stnSel", options[options.length > 1 ? 1 : 0]);
+      for (const id of ["hist", "fc"]) {
+        await expect.poll(() => page.evaluate((i) => !!Chart.getChart(i), id)).toBe(true);
+        await expect(page.locator(`#${id}`)).toBeVisible();
+      }
+      await page.waitForTimeout(500); // chart animation
+
+      await page.screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}.png`), fullPage: true });
+      expect(problems).toEqual([]);
+      await context.close();
+    });
+  }
+}

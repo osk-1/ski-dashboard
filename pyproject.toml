@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 160  # fetch.py already uses long one-line dict/list literals
+target-version = "py312"
+extend-exclude = ["node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]  # pycodestyle, pyflakes, import order
+ignore = [
+  "E501",  # long comment/literal lines are left to the formatter
+  "E731",  # fetch.py uses short local lambdas on purpose
+]
