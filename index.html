@@ -193,8 +193,8 @@ a { color: var(--accent); }
 const BOUNDS = { lon0: 10.09, lon1: 10.43, lat0: 47.003, lat1: 47.240 }; // west: east edge of the Sonnenkopf ski area; north: 2 km south of Warth
 const PLACES = [["St. Anton", 10.2636, 47.1295], ["St. Christoph", 10.2135, 47.1277], ["Pettneu", 10.3428, 47.1453],
   ["Ischgl", 10.2921, 47.0125]];
-const PEAKS = [["Valluga 2811", 10.2125, 47.1575], ["Scheibler 2978", 10.2220, 47.0587], ["Östlicher Augstenbergkopf 2881", 10.2402, 47.0775], ["Westlicher Augstenbergkopf 2855", 10.2357, 47.0770],
-  ["Östlicher Maroikopf 2529", 10.1632, 47.1136], ["Westlicher Maroikopf 2522", 10.1583, 47.1148], ["Kaltenberg 2896", 10.1383, 47.0865], ["Trittkopf 2720", 10.1935, 47.1553], ["Rüfispitze 2636", 10.1846, 47.1919],
+const PEAKS = [["Valluga 2811", 10.2125, 47.1575], ["Scheibler 2978", 10.2220, 47.0587], ["Augstenbergkopf 2881", 10.2402, 47.0775],
+  ["Maroikopf 2529", 10.1632, 47.1136],["Kaltenberg 2896", 10.1383, 47.0865], ["Trittkopf 2720", 10.1935, 47.1553], ["Rüfispitze 2636", 10.1846, 47.1919],
   ["Madlochspitze 2545", 10.1226, 47.1792], ["Erzbergspitze 2536", 10.1421, 47.1531], ["Wildebene 2570", 10.1803, 47.0958], ["Saumspitze 3039", 10.2696, 47.0509], ["Kreuzjochspitze 2919", 10.3061, 47.0793],
   ["Hochkarspitze 2836", 10.3076, 47.1108], ["Erlijoch 2431", 10.2179, 47.1756], ["Roßfallscharte 2732", 10.2887, 47.0945]];
 const STEPS = [10, 25, 50, 100]; // cm bands for the sequential scale
@@ -362,7 +362,8 @@ function renderMap() {
     if (lm.pk) { map[lay.on.peaks ? "addLayer" : "removeLayer"](lm.marker); if (!lay.on.peaks) continue; }
     const { x, y } = at(lm.lat, lm.lon), len = lm.name.length * 7;
     const sides = [["", [x - 6, y - 9, x + 14 + len, y + 9]], ["l", [x - 14 - len, y - 9, x + 6, y + 9]], ["d", [x - 6, y - 5, x + 6 + len, y + 22]], ["u", [x - 6, y - 22, x + 6 + len, y + 5]]];
-    const [side, box] = sides.reduce((best, c) => costAgainst(taken, c[1]) < costAgainst(taken, best[1]) ? c : best);
+    // peaks always label to the right of the symbol
+    const [side, box] = (lm.pk ? sides.slice(0, 1) : sides).reduce((best, c) => costAgainst(taken, c[1]) < costAgainst(taken, best[1]) ? c : best);
     lm.marker.getElement().firstChild.className = lm.marker.getElement().firstChild.className.replace(/ (l|d|u)$/, "") + (side && " " + side);
     taken.push(box);
   }
