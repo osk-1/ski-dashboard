@@ -4,7 +4,7 @@
 Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
   data/forecast.json   5-day snowfall and min/max temperature per station
-  data/readings.json   {slot: {t, hs}} history of snow stations; slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
+  data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
@@ -20,6 +20,7 @@ KEEP_DAYS = 60
 STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc682f9b", "KDIA2",
             "SARE2", "KSIN2", "KSPI2", "IPIS2", "aea1a765-2cff-3a00-bb88-3cfed1dfd875",
             "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
+FIELDS = ("hs", "lt", "wg", "wg_boe", "wr")  # per-slot maps in readings.json
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
@@ -44,6 +45,10 @@ def snapshot_url(slot_local):
 
 def num(v):
     return None if v is None else round(float(v), 1)
+
+
+def kmh(x):  # m/s -> km/h
+    return None if x is None else num(x * 3.6)
 
 
 def depth(v):
@@ -85,16 +90,33 @@ def vor_station(f):
             "date": datetime.fromisoformat(p["date"]).astimezone(TZ).isoformat()}
 
 
-def smet_hs(text, slot_times):
-    """{local slot key: HS cm} from a SMET file (UTC ISO timestamps, HS in m)."""
+def add(maps, id, **vals):
+    for k, v in vals.items():
+        if v is not None:
+            maps[k][id] = v
+
+
+def merge(readings, k, t, maps):
+    """Merge {field: {id: value}} into slot k; keeps other sources' ids and tolerates old slots lacking fields."""
+    slot = readings.setdefault(k, {})
+    slot["t"] = t
+    for f in FIELDS:
+        slot.setdefault(f, {}).update(maps.get(f, {}))
+
+
+def smet_history(text, slot_times):
+    """{local slot key: {field: value}} from a SMET file (UTC ISO timestamps; HS m, TA K, VW/VW_MAX m/s); absent fields skipped."""
     head, _, data = text.partition("[DATA]")
     hdr = {k.strip(): v.strip() for k, _, v in (l.partition("=") for l in head.splitlines()) if v}
-    i, nodata = hdr["fields"].split().index("HS"), float(hdr.get("nodata", -999))
+    cols, nodata = hdr["fields"].split(), float(hdr.get("nodata", -999))
+    conv = {"hs": ("HS", lambda x: depth(x * 100)), "lt": ("TA", lambda x: num(x - 273.15)), "wg": ("VW", kmh),
+            "wg_boe": ("VW_MAX", kmh), "wr": ("DW", num)}
     want = {t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"): t.strftime("%Y-%m-%dT%H") for t in slot_times}
     out = {}
     for r in (l.split() for l in data.splitlines()):
-        if r and r[0] in want and float(r[i]) != nodata:
-            out[want[r[0]]] = depth(float(r[i]) * 100)
+        if r and r[0] in want:
+            out[want[r[0]]] = {k: fn(float(r[cols.index(c)])) for k, (c, fn) in conv.items()
+                               if c in cols and float(r[cols.index(c)]) != nodata}
     return out
 
 
@@ -104,7 +126,6 @@ def parse_tawes(gj, names):
     for f in gj["features"]:
         p, id = f["properties"]["parameters"], f["properties"]["station"]
         v = lambda k: next((x for x in reversed(p.get(k, {}).get("data") or []) if x is not None), None)  # staggered: newest non-null
-        kmh = lambda x: None if x is None else num(x * 3.6)
         out.append({"id": "TAWES-" + id, "uuid": "TAWES-" + id, "name": names[id][0], "region": None,
                     "type": names[id][2], "lon": round(f["geometry"]["coordinates"][0], 5),
                     "lat": round(f["geometry"]["coordinates"][1], 5), "alt": names[id][1], "hs": depth(v("SCHNEE")), "n24": None,
@@ -114,15 +135,17 @@ def parse_tawes(gj, names):
 
 
 def tawes_history(gj, slot_keys):
-    """{local slot key: {TAWES-id: cm}} from a historical geojson (UTC 10-min timestamps), snow stations only."""
+    """{local slot key: {field: {TAWES-id: value}}} from a historical geojson (UTC 10-min timestamps); absent parameters skipped."""
     ts = [datetime.fromisoformat(t).astimezone(TZ).strftime("%Y-%m-%dT%H:%M") for t in gj["timestamps"]]
     out = {}
     for f in gj["features"]:
-        d = f["properties"]["parameters"]["SCHNEE"]["data"]
+        p = f["properties"]["parameters"]
+        col = lambda n: (p.get(n) or {}).get("data") or [None] * len(ts)
         for k in slot_keys:
-            i = ts.index(k + ":00") if k + ":00" in ts else None
-            if i is not None and d[i] is not None:
-                out.setdefault(k, {})["TAWES-" + f["properties"]["station"]] = depth(d[i])
+            if k + ":00" in ts:
+                i = ts.index(k + ":00")
+                add(out.setdefault(k, {x: {} for x in FIELDS}), "TAWES-" + f["properties"]["station"], hs=depth(col("SCHNEE")[i]),
+                    lt=num(col("TL")[i]), wg=kmh(col("FF")[i]), wg_boe=kmh(col("FFX")[i]), wr=num(col("DD")[i]))
     return out
 
 
@@ -235,7 +258,7 @@ def main(days):
             print("station missing from Vorarlberg feed:", m, file=sys.stderr)
     except Exception as e:
         print("Vorarlberg stations failed:", e, file=sys.stderr)
-    by_uuid = {s["uuid"]: s["id"] for s in stations if s["type"] == "snow"}
+    by_uuid = {s["uuid"]: s for s in stations}
 
     os.makedirs("data", exist_ok=True)
     try:
@@ -251,26 +274,28 @@ def main(days):
         except Exception as e:
             print("skip", s.isoformat(), e, file=sys.stderr)
             continue
-        hs = {by_uuid[f["id"]]: depth(f["properties"].get("HS")) for f in feats if f["id"] in by_uuid}
-        slot = readings.setdefault(s.strftime("%Y-%m-%dT%H"), {"hs": {}})
-        slot["t"] = s.isoformat()
-        slot["hs"].update(hs)  # merge: keep other sources' ids (TAWES)
-    try:  # TAWES snow height at the slot times, one historical request
+        maps = {k: {} for k in FIELDS}
+        for f in feats:
+            if f["id"] in by_uuid:
+                p, st = f["properties"], by_uuid[f["id"]]
+                add(maps, st["id"], hs=depth(p.get("HS")) if st["type"] == "snow" else None, lt=num(p.get("LT")),
+                    wg=num(p.get("WG")), wg_boe=num(p.get("WG_BOE")), wr=num(p.get("WR")))
+        merge(readings, s.strftime("%Y-%m-%dT%H"), s.isoformat(), maps)  # merge: keep other sources' ids (TAWES)
+    try:  # TAWES values at the slot times, one historical request
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
-        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE&station_ids=" + ",".join(
-            i for i, v in TAWES.items() if v[2] == "snow") + f"&start={u(sl[0])}&end={u(now)}")
-        for k, hs in tawes_history(gj, list(iso)).items():
-            readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"].update(hs)
+        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE,TL,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(sl[0])}&end={u(now)}")
+        for k, maps in tawes_history(gj, list(iso)).items():
+            merge(readings, k, iso[k], maps)
     except Exception as e:
         print("TAWES history failed:", e, file=sys.stderr)
-    for st in stations:  # Vorarlberg snow history: last 7 days of 5-min values per station
-        if st["id"].startswith("VOR-") and st["type"] == "snow":
+    for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
+        if st["id"].startswith("VOR-"):
             try:
                 req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
                 with urllib.request.urlopen(req, timeout=30) as r:
                     txt = gzip.decompress(r.read()).decode()
-                for k, cm in smet_hs(txt, sl).items():
-                    readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"][st["id"]] = cm
+                for k, vals in smet_history(txt, sl).items():
+                    merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items()})
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
     readings = prune(readings, now)
@@ -341,7 +366,13 @@ def selftest():
     g, a = parse_tawes(gj, TAWES)
     assert (g["id"], g["type"], g["hs"], g["wg"], g["wg_boe"], g["wr"], g["lt"], g["alt"]) == ("TAWES-11110", "wind", None, 19.8, 34.6, 273.0, -2.1, 2079)
     assert (a["type"], a["hs"], a["wg"]) == ("snow", 0.0, 0.7)
-    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {"2026-11-19T07": {"TAWES-11311": 0.0}}  # 06:00 UTC = 07:00 CET; Galzig has no snow
+    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {"2026-11-19T07": {  # 06:00 UTC = 07:00 CET; Galzig has no snow, 11311 no FF
+        "hs": {"TAWES-11311": 0.0}, "lt": {"TAWES-11110": -2.1, "TAWES-11311": 2.9}, "wg": {"TAWES-11110": 19.8},
+        "wg_boe": {"TAWES-11110": 34.6, "TAWES-11311": 6.8}, "wr": {"TAWES-11110": 273.0, "TAWES-11311": 226.0}}}
+    no = {"hs": {}, "lt": {}, "wg": {}, "wg_boe": {}, "wr": {}}
+    old = {"2026-11-19T07": {"t": "x", "hs": {"A": 1.0}}}  # old slot without the new maps
+    merge(old, "2026-11-19T07", "t", {"hs": {"B": 2.0}, "lt": {"A": -1.0}})
+    assert old == {"2026-11-19T07": {"t": "t", **no, "hs": {"A": 1.0, "B": 2.0}, "lt": {"A": -1.0}}}
     vf = {"id": "v", "geometry": {"coordinates": [10.170777, 47.173592, 1920]}, "properties": {
         "shortName": "ZURS1", "name": "Zürs Hexenboden", "microRegionID": "AT-08-03-01", "HS": 0.22, "HSD_24": 0.07,
         "TA": 271.9, "VW": 9.9, "VW_MAX": 20.1, "DW": 237, "date": "2026-11-20 09:00:00+00:00"}}
@@ -350,9 +381,11 @@ def selftest():
         ("VOR-ZURS1", "snow", 22.0, 7.0, -1.2, 35.6, 72.4, 237.0, 1920, "AT-08-03-01")
     assert v["date"] == "2026-11-20T10:00:00+01:00"
     assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A", "date": "2026-11-20 09:00:00+00:00"}})["lt"] is None
-    smet = ("SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS PSUM\n[DATA]\n"
-            "2026-11-19T06:00:00Z 270.1 0.15 0.0\n2026-11-19T11:00:00Z 271.0 -999 0.0\n2026-11-19T16:00:00Z 270.0 -0.01 0.0\n")
-    assert smet_hs(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {"2026-11-19T07": 15.0, "2026-11-19T17": 0.0}
+    smet = ("SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
+            "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n")
+    assert smet_history(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # no VW_MAX/DW columns; nodata per field
+        "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0}, "2026-11-19T12": {"lt": -2.1},
+        "2026-11-19T17": {"hs": 0.0, "lt": -3.1, "wg": 1.8}}
     print("selftest ok")
 
 
