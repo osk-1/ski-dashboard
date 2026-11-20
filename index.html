@@ -148,13 +148,13 @@ a { color: var(--accent); }
     </section>
   </div>
 
-  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Avalanche danger: Euregio bulletin (avalanche.report). St. Anton and Galzig: <a href="https://data.hub.geosphere.at" target="_blank" rel="noopener">GeoSphere Austria (CC BY 4.0)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
+  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Lech, Zürs, Langen Blasegg, Albona and Valluga: <a href="https://warnung.vorarlberg.at" target="_blank" rel="noopener">Lawinenwarndienst Vorarlberg</a>. Avalanche danger: Euregio bulletin (avalanche.report) and LWD Vorarlberg bulletin. St. Anton, Galzig and Langen/Arlberg: <a href="https://data.hub.geosphere.at" target="_blank" rel="noopener">GeoSphere Austria (CC BY 4.0)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-const BOUNDS = { lon0: 10.17, lon1: 10.43, lat0: 47.003, lat1: 47.168 };
+const BOUNDS = { lon0: 10.09, lon1: 10.43, lat0: 47.003, lat1: 47.240 }; // west: east edge of the Sonnenkopf ski area; north: 2 km south of Warth
 const PLACES = [["St. Anton", 10.2636, 47.1295], ["St. Christoph", 10.2135, 47.1277], ["Pettneu", 10.3428, 47.1453],
   ["Ischgl", 10.2921, 47.0125]];
 const PEAKS = [["Valluga 2811", 10.2125, 47.1575]];
@@ -202,9 +202,11 @@ function renderDanger() {
   const rs = Object.entries(state.danger?.regions || {}), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
   box.hidden = top.hidden = !rs.length;
   if (!rs.length) return;
-  const old = new Date(rs[0][1].valid_end) < new Date();
-  const day = new Date(rs[0][1].valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
-  const mx = Math.max(0, ...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
+  // per region: one bulletin can be current while the other is a leftover from an earlier run
+  const stale = r => new Date(r.valid_end) < new Date(), cur = rs.filter(([, r]) => !stale(r)), old = !cur.length;
+  const fmt = r => new Date(r.valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
+  const day = fmt(rs[0][1]);
+  const mx = Math.max(0, ...(old ? rs : cur).flatMap(([, r]) => r.ratings.map(x => x.level)));
   top.className = "meta" + (old ? " old" : "");
   top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
   box.className = "panel" + (old ? " old" : "");
@@ -213,7 +215,8 @@ function renderDanger() {
     for (const x of r.ratings) { const k = x.bound + x.elevation; if (!by[k] || x.level > by[k].level) by[k] = x; }
     const parts = Object.values(by).sort((a, b) => (a.bound === "below") - (b.bound === "below")).map(x => dchip(x.level, x.bound ? `${x.bound} ${esc(x.elevation)}${isNaN(x.elevation) ? "" : " m"}` : ""));
     const pr = [...new Set(r.problems.map(p => p.type.replace(/_/g, " ")))].map(esc).join(", ");
-    return `<div><b>${esc(r.name)}</b> ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
+    const note = !old && stale(r) ? ` <span class="meta">last bulletin ${fmt(r)}, not current</span>` : "";
+    return `<div${note ? ' class="old"' : ""}><b>${esc(r.name)}</b>${note} ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
   }).join("");
 }
 
