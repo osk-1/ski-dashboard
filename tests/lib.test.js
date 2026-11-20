@@ -81,6 +81,10 @@ test("valueState: ok, missing, stale per field, suspect, offline; dates[field] w
   assert.deepEqual(valueState(fresh, "wg", now), { suspect: true, reason: "sensor frozen?" });
   assert.deepEqual(valueState({ ...s, date: "2026-11-19T15:40:00+01:00" }, "hs", now), { offline: true, last: T("2026-11-19T15:40:00+01:00") });
   assert.equal(valueState({ ...s, date: undefined }, "hs", now).offline, true);
+  // derived new snow / change follow hs: stale, suspect or offline hs makes them so too
+  assert.deepEqual(valueState({ ...fresh, hsd24: 5, flags: { hs: "jump" } }, "hsd24", now), { suspect: true, reason: "jump" });
+  assert.deepEqual(valueState({ ...s, date: "2026-11-20T09:35:00+01:00", n24: 4 }, "n24", now), { stale: true, last: T("2026-11-20T09:35:00+01:00") });
+  assert.deepEqual(valueState({ ...fresh, hsd24: 5 }, "hsd24", now), { ok: true });
 });
 test("goodOnly nulls every value that is not ok; misplaced", () => {
   const now = T("2026-11-20T16:35:00+01:00");

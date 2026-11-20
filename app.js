@@ -293,7 +293,7 @@ function renderTable() {
     const d = delta24(s.id), hs = st(s, "hs"), wg = st(s, "wg"), gu = st(s, "wg_boe"), wr = st(s, "wr");
     return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
       <td class="nm" title="${esc(s.name)}">${esc(s.name)}<small>${s.alt} m</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : strike(hs, Math.round(s.hs) + '<span class="u"> cm</span>')}</b>${why([hs])}</td>
-      <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td>
+      <td class="n ${d > 0 && !isBad(hs) ? "up" : ""}">${d == null ? "–" : strike(hs, (d > 0 ? "+" : "") + d)}</td>
       <td class="n">${hasWind(s) ? `${arrowOn(s) ? strike(wr, `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span>`) + " " : ""}${strike(wg, Math.round(s.wg))}${s.wg_boe != null ? " / " + strike(gu, Math.round(s.wg_boe)) : ""}${why([wg, gu, wr])}` : "–"}</td></tr>`;
   }).join("");
   const sel = document.getElementById("stnSel");
@@ -398,10 +398,10 @@ function renderCond(s) {
   const from = now - condH * 3600e3, to = now + condH * 3600e3, past = f => slice(hours, f, id, from, now), fut = f => slice(hours, f, id, now + 1, to);
   const nn = a => a.some(p => p.y != null);
   const warm = css("--wind"), accent = css("--accent"), rain = css("--snow-2"), rainM = css("--snow-3"), muted = css("--muted");
-  // flagged hours (hourly.json hours[k].flags) are drawn faded, with a dot, and the tooltip names the reason
+  // flagged hours (hourly.json hours[k].flags) are drawn faded, with a hollow outlined dot (visible at phone size), and the tooltip names the reason
   const fade = c => `color-mix(in srgb, ${c} 30%, transparent)`, flagAt = x => x.chart.data.datasets[x.datasetIndex].data[x.p0DataIndex]?.fl || x.chart.data.datasets[x.datasetIndex].data[x.p1DataIndex]?.fl;
   const ln = (f, label, unit, c, o = {}) => ({ label, unit, src: `measured · ${srcOf(id)}`, data: past(f).map(p => ({ ...p, fl: hours[p.k]?.flags?.[id]?.[f] })), borderColor: c, backgroundColor: c, borderWidth: 2,
-    pointRadius: x => x.raw?.fl ? 3 : 0, pointBackgroundColor: fade(c), pointBorderColor: fade(c), segment: { borderColor: x => flagAt(x) ? fade(c) : undefined }, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
+    pointRadius: x => x.raw?.fl ? 3.5 : 0, pointBackgroundColor: css("--panel"), pointBorderColor: css("--fg"), pointBorderWidth: 1.5, segment: { borderColor: x => flagAt(x) ? fade(c) : undefined }, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
   const lt = ln("lt", "Air", "°C", warm), mt = { ...ln("mt", "Air · model", "°C", warm, { borderDash: [5, 4], borderWidth: 1.5, src: modelSrc }), data: fut("mt") };
   const oft = hasOft && ln("oft", "Snow surface", "°C", accent);
   const rh = el("condRh").checked && ln("rh", "Humidity", "%", muted, { borderWidth: 1, yAxisID: "yH" });
@@ -525,6 +525,8 @@ async function load() {
   } finally { loading = false; }
 }
 load();
+// accuracy is judged against the clock: re-check every minute without refetching (charts keep their state)
+setInterval(() => { if (state.stations.length) { renderBanner(); renderSummary(); renderMap(); renderTable(); renderChecks(); } }, 60e3);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && Date.now() - lastLoad > 30 * 60e3) load();
 });

@@ -11,6 +11,7 @@ function data() {
   const d = Object.fromEntries(["stations", "forecast", "readings", "danger", "regions", "hourly", "health"].map((n) => [n, fixture(n)]));
   const st = (id) => d.stations.stations.find((s) => s.id === id);
   st("VOR-ZURS1").date = "2026-11-20T13:35:00+01:00"; // 3 h before the run: wind stale, HS still fresh
+  st("KSIN2").date = "2026-11-20T09:35:00+01:00"; // 7 h: HS and its 24 h change stale
   Object.assign(st("SAGA1"), { wg: 0, wg_boe: 0, flags: { wg: "sensor frozen?", wg_boe: "sensor frozen?", wr: "sensor frozen?" } }); // rimed anemometer
   Object.assign(st("SKAP2"), { lat: st("SKAP2").lat + 0.009, flags: { station: "location mismatch" } }); // moved 1 km
   d.health.run = "2026-11-20T14:00+01:00"; // last successful refresh 2 h 35 min before "now"
@@ -35,7 +36,7 @@ async function open(browser, vp, scheme, d) {
     if (url.includes("fonts.googleapis")) return route.fulfill({ contentType: "text/css", body: "" });
     return route.abort();
   });
-  await page.clock.setFixedTime(new Date(d.stations.updated));
+  await page.clock.install({ time: new Date(d.stations.updated) }); // time flows from the run time; fastForward drives the minute re-check
   await page.goto("/index.html");
   await expect(page.locator("#updated")).toContainText("stations");
   return { page, context, problems };
@@ -61,11 +62,18 @@ for (const vp of VIEWPORTS) {
       await expect(row.locator("td").nth(2).locator("s")).toHaveCount(0);
       await expect(row.locator("td").nth(4).locator("s.bad")).toHaveCount(3);
       await expect(row.locator("td").nth(4)).toContainText("no recent data (last 13:35)");
+      await expect(row.locator("td").nth(3).locator("s")).toHaveCount(0); // 24 h change follows HS: fresh
+      for (const id of ["KSIN2", "SAUL2"]) { // stale / offline HS: HS and 24 h change struck
+        const r = page.locator(`#rows tr[data-id="${id}"]`);
+        await expect(r.locator("td").nth(2).locator("s.bad")).toHaveCount(1);
+        await expect(r.locator("td").nth(3).locator("s.bad")).toHaveCount(1);
+      }
+      await expect(page.locator('#rows tr[data-id="KSIN2"] .why')).toHaveText("no recent data (last 09:35)");
 
       // rimed anemometer: suspect on the map, excluded from the summary with the reason
       await expect(page.locator(".leaflet-tooltip.val", { hasText: "Gampberg Windstation" })).toContainText("suspect: sensor frozen?");
       await expect(page.locator("#summary")).toContainText("Gampberg Windstation (wind, gusts, wind direction: suspect: sensor frozen?)");
-      await expect(page.locator("#summary")).toContainText("1 excluded"); // Ulmerhütte HS, offline
+      await expect(page.locator("#summary")).toContainText("2 excluded"); // Ulmerhütte HS offline, Kappl Sinsenergampen stale
       await expect(page.locator('#rows tr[data-id="SAGA1"] .why')).toHaveText("suspect: sensor frozen?");
       await shot(page.locator("#tableDetails"), "table");
 
@@ -86,6 +94,10 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#condNote")).toContainText("Faded points");
       await expect(page.locator("#fcSource")).toContainText("Model: Open-Meteo, issued");
       await shot(page.locator("#condBox"), "cond-flag");
+      // the minute re-check, no refetch: 3 h later Zürs HS (13:35) is past 6 h and gets struck
+      await page.clock.fastForward("03:01:00");
+      await expect(page.locator('#rows tr[data-id="VOR-ZURS1"] td').nth(2).locator("s.bad")).toHaveCount(1);
+      await expect(page.locator("#banner")).toBeVisible();
       expect(problems).toEqual([]);
       await context.close();
     });

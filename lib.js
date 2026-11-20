@@ -45,6 +45,7 @@ const refroze = (hours, id, now) => { const p = period(hours, "oft", id, now, tr
 const staleAfter = { wg: H, wg_boe: H, wr: H, lt: 2 * H, oft: 2 * H, rh: 2 * H, hs: 6 * H, n24: 6 * H, hsd24: 6 * H }, offlineAfter = 24 * H;
 const valueState = (s, f, now) => {
   if (s[f] == null) return { missing: true };
+  if ((f === "n24" || f === "hsd24") && s.hs != null) { const h = valueState(s, "hs", now); if (!h.ok) return h; } // derived from hs: no better than hs
   const last = Date.parse(s.dates?.[f] || s.date), age = now - last;
   if (!(age <= offlineAfter)) return { offline: true, last }; // no or unreadable time counts as offline
   if (age > staleAfter[f]) return { stale: true, last };
