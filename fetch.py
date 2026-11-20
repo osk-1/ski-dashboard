@@ -250,19 +250,20 @@ def hkey(t):
     return t.astimezone(TZ).strftime("%Y-%m-%dT%H")
 
 
-def hmerge(hours, k, maps):
-    """Merge {field: {id: value}} into hours[k], skipping empty maps."""
+def hmerge(hours, k, maps, keep=False):
+    """Merge {field: {id: value}} into hours[k], skipping empty maps; keep=True never replaces a value already there."""
     for f, m in maps.items():
         if m:
-            hours.setdefault(k, {}).setdefault(f, {}).update(m)
+            d = hours.setdefault(k, {}).setdefault(f, {})
+            d.update({**m, **d} if keep else m)
 
 
-def tirol_hours(feats, by_uuid, only=None):
-    """{local hour key: {field: {id: value}}} from avalanche.report features, keyed by each feature's own date floored to the hour; with only, other hours are dropped (an archive feature repeating an old measurement must not pose as a new hour)."""
+def tirol_hours(feats, by_uuid):
+    """{local hour key: {field: {id: value}}} from avalanche.report features, keyed by each feature's own date floored to the hour, whichever file it came from (a repeated old measurement must not pose as a new hour)."""
     out = {}
     for f in feats:
         p, st = f["properties"], by_uuid.get(f["id"])
-        if st and p.get("date") and (k := hkey(datetime.fromisoformat(p["date"]))) == (only or k):
+        if st and p.get("date") and (k := hkey(datetime.fromisoformat(p["date"]))):
             add(
                 out.setdefault(k, {x: {} for x in HFIELDS}),
                 st["id"],
@@ -451,12 +452,12 @@ def main(days):
     hours = hourly["hours"]
     for t in missing_hours(hours, STATIONS, now):  # Tirol archive: only hours not yet recorded
         try:
-            for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid, hkey(t)).items():
-                hmerge(hours, k, maps)
+            for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
+                hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
         except Exception as e:
             print("skip hour", t.isoformat(), e, file=sys.stderr)
     for k, maps in tirol_hours(live, by_uuid).items():
-        hmerge(hours, k, maps)
+        hmerge(hours, k, maps, keep=True)
     sl = slots(days, now)
     iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
     for s in sl:
@@ -712,12 +713,21 @@ def selftest():
     by = {"u1": {"id": "SKAP2", "type": "snow"}, "u2": {"id": "SKAP1", "type": "wind"}}
     feats = [
         {"id": "u1", "properties": {"date": "2026-11-20T07:10:00+01:00", "LT": -2.8, "OFT": -3.2, "RH": 91.6, "HS": 30.8}},
-        {"id": "u2", "properties": {"date": "2026-11-20T06:00:00+01:00", "LT": -4.6, "HS": 5, "WG": 49.4}},  # stale: repeats the 06 reading
+        {"id": "u2", "properties": {"date": "2026-11-20T06:00:00+01:00", "LT": -4.6, "HS": 5, "WG": 49.4}},  # older: belongs to 06
         {"id": "x", "properties": {"date": "2026-11-20T07:00:00+01:00", "LT": 1}},
     ]
-    th = tirol_hours(feats, by, "2026-11-20T07")
-    assert nonempty(th) == {"2026-11-20T07": {"lt": {"SKAP2": -2.8}, "oft": {"SKAP2": -3.2}, "rh": {"SKAP2": 91.6}, "hs": {"SKAP2": 30.8}}}
-    assert sorted(tirol_hours(feats, by)) == ["2026-11-20T06", "2026-11-20T07"]  # live feed: each at its own hour; wind station hs ignored
+    th = nonempty(tirol_hours(feats, by))  # e.g. the 08 CET file: each value lands at its own date's hour, never the file's
+    assert th == {
+        "2026-11-20T07": {"lt": {"SKAP2": -2.8}, "oft": {"SKAP2": -3.2}, "rh": {"SKAP2": 91.6}, "hs": {"SKAP2": 30.8}},
+        "2026-11-20T06": {"lt": {"SKAP1": -4.6}, "wg": {"SKAP1": 49.4}},  # wind station hs ignored
+    }
+    hk = {"2026-11-20T06": {"lt": {"SKAP1": -4.0}}}
+    for k, maps in th.items():
+        hmerge(hk, k, maps, keep=True)
+    assert (hk["2026-11-20T06"], hk["2026-11-20T07"]["lt"]) == (
+        {"lt": {"SKAP1": -4.0}, "wg": {"SKAP1": 49.4}},
+        {"SKAP2": -2.8},
+    )  # existing value at H not replaced
     now = datetime(2026, 11, 20, 8, 30, tzinfo=TZ)
     hm = {"2026-11-20T07": {"lt": {"SKAP2": 1}}, "2026-11-20T06": {"pm": {"SKAP2": 1}, "lt": {"TAWES-1": 1}}}  # model/other sources don't count
     mh = [hkey(t) for t in missing_hours(hm, STATIONS, now)]
