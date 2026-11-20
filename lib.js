@@ -28,17 +28,18 @@ const slice = (hours, field, id, from, to) => {
 };
 // newest recorded value of a field at or before `to`
 const latest = (hours, field, id, to) => { const lim = viennaKey(to), k = Object.keys(hours).sort().reverse().find(k => k <= lim && hours[k][field]?.[id] != null); return k ? { k, y: hours[k][field][id] } : null; };
-// latest night (18:00-08:00) or day (08:00-18:00) among the points that has data: { pts with data, hours of it in the points }
-const period = (pts, night) => {
-  const prev = k => new Date(Date.UTC(+k.slice(0, 4), k.slice(5, 7) - 1, +k.slice(8, 10) - 1)).toISOString().slice(0, 10);
-  const grp = k => { const h = +k.slice(11, 13); return night ? (h >= 18 ? k.slice(0, 10) : h < 8 ? prev(k) : null) : (h >= 8 && h < 18 ? k.slice(0, 10) : null); };
-  const g = [...pts].reverse().find(p => p.y != null && grp(p.k) != null);
-  if (!g) return null;
-  const all = pts.filter(p => grp(p.k) === grp(g.k));
-  return { date: grp(g.k), pts: all.filter(p => p.y != null), of: all.length };
+// the latest night (18:00-08:00) or day (08:00-18:00) that has ended by `now`, over its full length in hourly.json
+// { date (local date it starts on), pts with data, of = hours in the period (DST-aware, normally 14 / 10) }
+const period = (hours, field, id, now, night) => {
+  const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10);
+  const span = d => night ? [keyMs(d + "T18"), keyMs(shift(d, 1) + "T08")] : [keyMs(d + "T08"), keyMs(d + "T18")];
+  let d = viennaKey(now).slice(0, 10);
+  while (span(d)[1] > now) d = shift(d, -1);
+  const [from, to] = span(d), all = slice(hours, field, id, from, to - H), pts = all.filter(p => p.y != null);
+  return pts.length ? { date: d, pts, of: all.length } : null;
 };
-const extreme = (pts, night) => { const p = period(pts, night); return p && { ...p, at: p.pts.reduce((a, b) => (night ? b.y < a.y : b.y > a.y) ? b : a) }; };
-// surface refroze: below 0 °C in every overnight hour with data; null = no overnight data
-const refroze = oft => { const p = period(oft, true); return p && { ...p, ok: p.pts.every(x => x.y < 0), warm: p.pts.find(x => x.y >= 0) }; };
+const extreme = (hours, field, id, now, night) => { const p = period(hours, field, id, now, night); return p && { ...p, at: p.pts.reduce((a, b) => (night ? b.y < a.y : b.y > a.y) ? b : a) }; };
+// surface refroze: below 0 °C in every hour with data of the last complete night; null = no data that night
+const refroze = (hours, id, now) => { const p = period(hours, "oft", id, now, true); return p && { ...p, ok: p.pts.every(x => x.y < 0), warm: p.pts.find(x => x.y >= 0) }; };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 if (typeof module !== "undefined") module.exports = { STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze };

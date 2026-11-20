@@ -375,7 +375,7 @@ function renderCond(s) {
   el("condBox").hidden = condH === 1; el("condNow").hidden = condH !== 1; el("condRh").parentNode.hidden = condH === 1;
   if (condH === 1) {
     el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now);
-      return `<div class="stat"><b>${v ? `${v.y} ${u}` : "–"}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}</small></div>`; }).join("");
+      return `<div class="stat"><b>${v ? `${esc(v.y)} ${u}` : "–"}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}</small></div>`; }).join("");
     el("condNote").textContent = `Latest measured values (${srcOf(id)}), with their measurement times.`;
     return;
   }
@@ -414,12 +414,13 @@ function renderCond(s) {
         ...(nn(pr.data) || nn(pm.data) ? { yP: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: gauge ? "mm" : "cm / mm" } } } : {}),
         ...(rh && nn(rh.data) ? { yH: { position: "right", min: 0, max: 100, grid: { display: false }, title: { display: true, text: "%" } } } : {}) } },
   });
-  const t = (v, u = "°C") => `${v.y} ${u} at ${fmtHour(keyMs(v.k))}`, ltp = past("lt");
-  const n = extreme(ltp, true), d = extreme(ltp, false), fr = hasOft && refroze(past("oft"));
+  // last complete night / day from all of hourly.json, not just the window
+  const t = v => `${v.y} °C at ${fmtHour(keyMs(v.k))}`, day = d => new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  const n = extreme(hours, "lt", id, now, true), d = extreme(hours, "lt", id, now, false), fr = hasOft && refroze(hours, id, now), cnt = p => `${p.pts.length} of ${p.of} h with data`;
   el("condNote").textContent = [
-    n ? `Overnight min (18–08 h): ${t(n.at)} (${n.pts.length} of ${n.of} h with data).` : "No overnight air temperature in this window.",
-    d ? `Daytime max (08–18 h): ${t(d.at)} (${d.pts.length} of ${d.of} h with data).` : "No daytime air temperature in this window.",
-    ...(hasOft ? [fr ? (fr.ok ? `Snow surface refroze overnight (below 0 °C in all ${fr.pts.length} hours with data).` : `Snow surface didn't refreeze overnight (${t(fr.warm)}).`) : "No overnight snow surface data in this window."] : []),
+    n ? `Overnight min (night from ${day(n.date)}, 18–08 h): ${t(n.at)} (${cnt(n)}).` : "No air temperature for the last complete night.",
+    d ? `Daytime max (${day(d.date)}, 08–18 h): ${t(d.at)} (${cnt(d)}).` : "No air temperature for the last complete day.",
+    ...(hasOft ? [fr ? (fr.ok ? `Snow surface refroze in the night from ${day(fr.date)} (below 0 °C in every hour with data, ${cnt(fr)}).` : `Snow surface didn't refreeze in the night from ${day(fr.date)} (${t(fr.warm)}, ${cnt(fr)}).`) : "No snow surface data for the last complete night."] : []),
     hasModel ? `Dashed / outlined: ${modelSrc}.` : "Model unavailable.",
   ].join(" ");
 }

@@ -39,17 +39,31 @@ test("slice: one point per hour, gaps stay null", () => {
   assert.deepEqual(latest(hours, "lt", "A", keyMs("2026-11-20T11")), { k: "2026-11-20T10", y: -1 });
   assert.equal(latest(hours, "lt", "C", Date.now()), null);
 });
-const pts = vals => Object.entries(vals).map(([k, y]) => ({ k, y }));
-test("extreme: latest night min and day max", () => {
-  const p = pts({ "2026-11-19T12": 4, "2026-11-19T17": 1, "2026-11-19T18": 0, "2026-11-19T23": -2, "2026-11-20T03": -5, "2026-11-20T07": -1, "2026-11-20T08": 3, "2026-11-20T09": null });
-  const n = extreme(p, true), d = extreme(p, false);
-  assert.equal(n.date, "2026-11-19"); assert.deepEqual(n.at, { k: "2026-11-20T03", y: -5 }); assert.equal(n.pts.length, 4);
-  assert.equal(d.date, "2026-11-20"); assert.equal(d.at.y, 3); assert.equal(d.of, 2); assert.equal(d.pts.length, 1);
-  assert.equal(extreme(pts({ "2026-11-20T12": 1 }), true), null);
+const hrs = (field, vals) => Object.fromEntries(Object.entries(vals).map(([k, y]) => [k, { [field]: { A: y } }]));
+const fullNight = (f = (i) => -i) => { // 2026-11-19T18 ... 2026-11-20T07, values f(0..13)
+  const o = {}; for (let i = 0; i < 14; i++) o[viennaKey(keyMs("2026-11-19T18") + i * 3600e3)] = f(i); return o;
+};
+test("period: last complete night and day at 19:00", () => {
+  const h = hrs("lt", { ...fullNight(), "2026-11-20T08": 1, "2026-11-20T12": 5, "2026-11-20T17": 2, "2026-11-20T18": -9 });
+  const now = keyMs("2026-11-20T19");
+  const n = extreme(h, "lt", "A", now, true), d = extreme(h, "lt", "A", now, false);
+  assert.equal(n.date, "2026-11-19"); assert.equal(n.of, 14); assert.equal(n.pts.length, 14); assert.deepEqual(n.at, { x: keyMs("2026-11-20T07"), y: -13, k: "2026-11-20T07" }); // tonight's -9 is not counted
+  assert.equal(d.date, "2026-11-20"); assert.equal(d.of, 10); assert.equal(d.pts.length, 3); assert.equal(d.at.y, 5);
+  assert.equal(extreme(h, "lt", "A", keyMs("2026-11-20T17"), false), null); // today's day not over yet -> yesterday, which has no data
 });
-test("refroze: below 0 in every overnight hour with data", () => {
-  assert.equal(refroze(pts({ "2026-11-19T20": -1, "2026-11-20T02": null, "2026-11-20T06": -0.1 })).ok, true);
-  const r = refroze(pts({ "2026-11-19T20": -1, "2026-11-20T02": 0 }));
-  assert.equal(r.ok, false); assert.equal(r.warm.k, "2026-11-20T02");
-  assert.equal(refroze(pts({ "2026-11-20T10": -4, "2026-11-20T02": null })), null);
+test("period: 10:00 with a short window still uses the full last night", () => {
+  const n = extreme(hrs("lt", fullNight()), "lt", "A", keyMs("2026-11-20T10"), true);
+  assert.equal(n.of, 14); assert.equal(n.pts.length, 14); assert.equal(n.date, "2026-11-19");
+});
+test("period: DST nights are 13 / 15 h long", () => {
+  assert.equal(extreme(hrs("lt", { "2026-03-29T05": 1 }), "lt", "A", keyMs("2026-03-29T12"), true).of, 13);
+  assert.equal(extreme(hrs("lt", { "2026-10-25T05": 1 }), "lt", "A", keyMs("2026-10-25T12"), true).of, 15);
+});
+test("refroze: below 0 in every overnight hour with data, partial data counted", () => {
+  const now = keyMs("2026-11-20T10");
+  const r = refroze(hrs("oft", { "2026-11-19T20": -1, "2026-11-20T02": null, "2026-11-20T06": -0.1 }), "A", now);
+  assert.equal(r.ok, true); assert.equal(`${r.pts.length} of ${r.of} h`, "2 of 14 h");
+  const w = refroze(hrs("oft", { "2026-11-19T20": -1, "2026-11-20T02": 0 }), "A", now);
+  assert.equal(w.ok, false); assert.equal(w.warm.k, "2026-11-20T02");
+  assert.equal(refroze(hrs("oft", { "2026-11-20T09": -4, "2026-11-19T17": -2 }), "A", now), null); // nothing inside 18-08
 });
