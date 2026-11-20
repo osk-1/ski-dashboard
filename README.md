@@ -7,15 +7,21 @@ Live page: https://osk-1.github.io/ski-dashboard/
 
 ## How it works
 
-1. A GitHub Actions workflow (`.github/workflows/fetch.yml`) runs `fetch.py` at about 07:10, 12:10 and
-   17:10 Vienna time (GitHub can delay scheduled runs by 10–30 min) and commits the results in `data/`:
+1. A GitHub Actions workflow (`.github/workflows/fetch.yml`) runs `fetch.py` and publishes the results in `data/` to GitHub Pages (no data commits). Schedule, Vienna time: hourly 06–08, every 30 min 08–15, hourly 15–20, none 20–06. An external scheduler triggers it; GitHub's own cron (`:07`/`:37`) is the backup. A gate step exits early outside 06:00–19:59 or if the live data is under 20 min old. The run first downloads the live `data/*.json` and fails without publishing if that is missing or empty (so history is never reset). Files:
    - `stations.json`: `updated` (time of the run) and `stations`, the current readings per station (see below)
    - `forecast.json`: `source`, `generated`, `days` and `points` (`{stationId: {snowfall, tmin, tmax, depth}}`: 5-day snowfall cm, min/max temperature °C, modelled snow depth cm)
    - `readings.json`: `{slot: {t, hs, lt, wg, wg_boe, wr}}` at every 07/12/17 slot (the history, last 60 days), each a `{stationId: value}` map for all stations including wind-only ones; units as above, null values omitted
    - `danger.json`: `source`, `generated` and `regions`, the avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`, and from the Vorarlberg bulletin `AT-08-03-01`, `AT-08-03-02`, `AT-08-04`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems` (`type`, `elevation`, `aspects`), `name`, `published`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current. The Vorarlberg bulletin 404s until its first bulletin of the season (usually early December); a bulletin that fails keeps its regions from the last run
 2. GitHub Pages serves `index.html`, which reads those files.
 
-To record now: Actions tab → "Record snow data" → Run workflow.
+To record now: Actions tab → "Record snow data" → Run workflow, tick `force`.
+
+### Setup (repo owner)
+
+1. Settings → Pages → Source: **GitHub Actions**.
+2. Fine-grained personal access token: repository access only `osk-1/ski-dashboard`, permission Actions: Read and write, with an expiry (note the renewal date).
+3. External scheduler (e.g. cron-job.org, timezone Europe/Vienna) jobs `0 6,7 * * *`, `0,30 8-14 * * *`, `0 15-19 * * *`, each `POST https://api.github.com/repos/osk-1/ski-dashboard/actions/workflows/fetch.yml/dispatches` with headers `Authorization: Bearer <token>`, `Accept: application/vnd.github+json` and body `{"ref":"main"}`.
+4. After the first successful deploy: `git rm -r --cached data`, add `data/` to `.gitignore`, commit. (Until then `data/` in `main` seeds the first run.)
 
 ## Stations
 
