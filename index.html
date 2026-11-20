@@ -55,6 +55,9 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .leaflet-control-attribution a { color: var(--accent); }
 #map path[tabindex] { cursor: pointer; outline: none; }
 #map path[tabindex]:focus-visible { stroke: var(--accent); stroke-width: 4; }
+#map .wind-ic { pointer-events: none; outline: none; cursor: pointer; } /* the 44px box must not steal taps from neighbours: only its shapes are live */
+#map .wind-ic svg > * { pointer-events: auto; }
+#map .wind-ic:focus-visible circle { stroke: var(--accent); stroke-width: 3; }
 #map .leaflet-tooltip.val { background: var(--panel); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; box-shadow: none; padding: 1px 5px; font: 600 .9rem/1.2 var(--body); }
 #map.narrow .leaflet-tooltip.val { padding: 0 4px; font-size: .78rem; }
 #map .leaflet-tooltip.val::before { display: none; }
@@ -279,7 +282,7 @@ function renderMap() {
   lg.innerHTML = `<span class="ls"><span>Snow<span class="cm"> height</span>:</span>` +
     ["&lt;10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i><span>${l}<span class="cm"> cm</span></span>`).join("") +
     `<span class="ph">cm</span></span><button type="button" aria-label="Wind legend" aria-expanded="${lg.classList.contains("open")}">?</button>` +
-    `<span class="sep">·</span><span class="wx"><svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station</span>`;
+    `<span class="sep">·</span><span class="wx"><svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · arrow alone = wind-only station</span>`;
   if (typeof L === "undefined") { mapDiv.innerHTML = '<div class="empty">Map unavailable.</div>'; return; }
   if (!state.stations.length) return;
   if (!map) initMap();
@@ -295,7 +298,7 @@ function renderMap() {
   const controls = [0, 0, 50, 112]; // zoom + reset column, weighted 10x: nothing should sit under it
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * overlap(r, controls) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
   const stationBoxes = [];
-  for (const s of state.stations) { const { x, y } = at(s.lat, s.lon); stationBoxes.push([x - 14, y - 14, x + 14, y + 14]); if (arrowOn(s)) stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
+  for (const s of state.stations) { const { x, y } = at(s.lat, s.lon); stationBoxes.push([x - 14, y - 14, x + 14, y + 14]); if (arrowOn(s) && s.type !== "wind") stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
   const taken = [...stationBoxes];
   for (const lm of landmarks) {
     const { x, y } = at(lm.lat, lm.lon), len = lm.name.length * 7;
@@ -323,17 +326,19 @@ function renderMap() {
     taken.push(spot.box);
     const dir = spot.dir, offset = spot.off;
     if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", e => select(state.stations.reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(stnLayer); // overlapping pads: pick the station nearest the tap // 44px touch target
-    const m = L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : wo ? css("--wind") : css("--panel"), fillColor: wo ? css("--panel") : snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
+    // wind-only: just the arrow (or a calm ring) centred in a 44px box, haloed when selected; snow stations keep the coloured dot
+    const m = wo ? L.marker([s.lat, s.lon], { keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [44, 44], iconAnchor: [22, 22], html: `<svg width="44" height="44" viewBox="-22 -22 44 44"><circle r="13" fill="${sel ? css("--panel") : "transparent"}"${sel ? ` stroke="${css("--fg")}" stroke-width="3"` : ""}/>${arrowOn(s) ? arrow(0, 0, (s.wr + 180) % 360, css("--wind")) : `<circle r="4.5" fill="${css("--panel")}" stroke="${css("--wind")}" stroke-width="2"/>`}</svg>` }) }).addTo(stnLayer)
+      : L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
     m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
     m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
     t.textContent = `${s.name} · ${s.alt} m · ${wo ? "wind station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
-    el.append(t);
+    if (wo) el.title = t.textContent; else el.append(t); // SVG paths take a <title>, the HTML wind icon a title attribute
     el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); el.dataset.sid = s.id;
     el.setAttribute("aria-label", `${s.name}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : (s.hs ?? "no") + " cm"}`);
     el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(s.id); } });
     if (s.id === focusId) focusEl = el;
-    if (arrowOn(s)) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, sel ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(stnLayer);
+    if (arrowOn(s) && !wo) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, sel ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(stnLayer);
   }
   focusEl?.focus();
 }
