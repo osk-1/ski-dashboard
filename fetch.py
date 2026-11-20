@@ -9,7 +9,12 @@ Writes:
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
 """
-import gzip, json, os, sys, urllib.request
+
+import gzip
+import json
+import os
+import sys
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -17,19 +22,44 @@ TZ = ZoneInfo("Europe/Vienna")
 SLOT_HOURS = (7, 12, 17)
 KEEP_DAYS = 60
 # Feed IDs (LWD-Nummer, or feature id when none): snow stations, then wind stations
-STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc682f9b", "KDIA2",
-            "SARE2", "KSIN2", "KSPI2", "IPIS2", "aea1a765-2cff-3a00-bb88-3cfed1dfd875",
-            "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
+STATIONS = (
+    "SAUL2",
+    "SKAP2",
+    "SAAU2",
+    "SAGA2",
+    "c9b477f0-c934-013d-99fc-5af9cc682f9b",
+    "KDIA2",
+    "SARE2",
+    "KSIN2",
+    "KSPI2",
+    "IPIS2",
+    "aea1a765-2cff-3a00-bb88-3cfed1dfd875",
+    "SKAP1",
+    "SAGA1",
+    "SAAU1",
+    "KSIN1",
+    "KDIA1",
+    "SAYO1",
+    "SARE1",
+    "KGRO1",
+    "IPIS1",
+)
 FIELDS = ("hs", "lt", "wg", "wg_boe", "wr")  # per-slot maps in readings.json
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
-TAWES = {"11311": ("St. Anton (Tal)", 1304, "snow"), "11110": ("Galzig", 2079, "wind"), "11307": ("Langen/Arlberg", 1221, "snow")}  # GeoSphere TAWES id: (name, altitude m, type)
+TAWES = {
+    "11311": ("St. Anton (Tal)", 1304, "snow"),
+    "11110": ("Galzig", 2079, "wind"),
+    "11307": ("Langen/Arlberg", 1221, "snow"),
+}  # GeoSphere TAWES id: (name, altitude m, type)
 VOR = "https://lawinen.at/smet/vor/"  # LWD Vorarlberg station feed (what at-08.lawinen-warnung.eu's station map reads)
 VOR_IDS = {"ZURS1": "snow", "LECA1": "snow", "LECH1": "snow", "LANG1": "snow", "ALBO2": "snow", "VALL1": "wind"}  # shortName: type
-BULLETINS = {"Euregio avalanche.report": "https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json",
-             # 404 until LWD Vorarlberg publishes the season's first bulletin (usually early December)
-             "LWD Vorarlberg": "https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json"}
+BULLETINS = {
+    "Euregio avalanche.report": "https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json",
+    # 404 until LWD Vorarlberg publishes the season's first bulletin (usually early December)
+    "LWD Vorarlberg": "https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json",
+}
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
 
 
@@ -82,12 +112,24 @@ def vor_station(f):
     """Vorarlberg feature -> station dict. Units there: HS/HSD_24 m, TA K, VW/VW_MAX m/s."""
     p, c = f["properties"], f["geometry"]["coordinates"]
     scale = lambda k, x: None if p.get(k) is None else p[k] * x
-    return {"id": "VOR-" + p["shortName"], "uuid": f["id"], "name": p["name"], "region": p.get("microRegionID"),
-            "type": VOR_IDS[p["shortName"]], "lon": round(c[0], 5), "lat": round(c[1], 5), "alt": int(c[2]),
-            "hs": depth(scale("HS", 100)), "n24": None, "hsd24": num(scale("HSD_24", 100)),  # PSUM_24 is rain+snow water, not new snow
-            "lt": None if p.get("TA") is None else num(p["TA"] - 273.15),
-            "wg": num(scale("VW", 3.6)), "wg_boe": num(scale("VW_MAX", 3.6)), "wr": num(p.get("DW")),
-            "date": datetime.fromisoformat(p["date"]).astimezone(TZ).isoformat()}
+    return {
+        "id": "VOR-" + p["shortName"],
+        "uuid": f["id"],
+        "name": p["name"],
+        "region": p.get("microRegionID"),
+        "type": VOR_IDS[p["shortName"]],
+        "lon": round(c[0], 5),
+        "lat": round(c[1], 5),
+        "alt": int(c[2]),
+        "hs": depth(scale("HS", 100)),
+        "n24": None,
+        "hsd24": num(scale("HSD_24", 100)),  # PSUM_24 is rain+snow water, not new snow
+        "lt": None if p.get("TA") is None else num(p["TA"] - 273.15),
+        "wg": num(scale("VW", 3.6)),
+        "wg_boe": num(scale("VW_MAX", 3.6)),
+        "wr": num(p.get("DW")),
+        "date": datetime.fromisoformat(p["date"]).astimezone(TZ).isoformat(),
+    }
 
 
 def add(maps, id, **vals):
@@ -107,19 +149,20 @@ def merge(readings, k, t, maps):
 def smet_history(text, slot_times):
     """{local slot key: {field: value}} from a SMET file (UTC ISO timestamps; HS m, TA K, VW/VW_MAX m/s); absent fields skipped."""
     head, _, data = text.partition("[DATA]")
-    hdr = {k.strip(): v.strip() for k, _, v in (l.partition("=") for l in head.splitlines()) if v}
+    hdr = {k.strip(): v.strip() for k, _, v in (ln.partition("=") for ln in head.splitlines()) if v}
     cols, nodata = hdr["fields"].split(), float(hdr.get("nodata", -999))
-    conv = {"hs": ("HS", lambda x: depth(x * 100)), "lt": ("TA", lambda x: num(x - 273.15)), "wg": ("VW", kmh),
-            "wg_boe": ("VW_MAX", kmh), "wr": ("DW", num)}
+    conv = {"hs": ("HS", lambda x: depth(x * 100)), "lt": ("TA", lambda x: num(x - 273.15)), "wg": ("VW", kmh), "wg_boe": ("VW_MAX", kmh), "wr": ("DW", num)}
     want = {t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"): t.strftime("%Y-%m-%dT%H") for t in slot_times}
     out = {}
+
     def cell(r, c):  # one bad cell must not drop the row
         try:
             x = float(r[cols.index(c)])
         except (IndexError, ValueError):
             return None
         return None if x == nodata else x
-    for r in (l.split() for l in data.splitlines()):
+
+    for r in (ln.split() for ln in data.splitlines()):
         if r and r[0] in want:
             out[want[r[0]]] = {k: fn(x) for k, (c, fn) in conv.items() if c in cols and (x := cell(r, c)) is not None}
     return out
@@ -131,11 +174,26 @@ def parse_tawes(gj, names):
     for f in gj["features"]:
         p, id = f["properties"]["parameters"], f["properties"]["station"]
         v = lambda k: next((x for x in reversed(p.get(k, {}).get("data") or []) if x is not None), None)  # staggered: newest non-null
-        out.append({"id": "TAWES-" + id, "uuid": "TAWES-" + id, "name": names[id][0], "region": None,
-                    "type": names[id][2], "lon": round(f["geometry"]["coordinates"][0], 5),
-                    "lat": round(f["geometry"]["coordinates"][1], 5), "alt": names[id][1], "hs": depth(v("SCHNEE")), "n24": None,
-                    "hsd24": None, "lt": num(v("TL")), "wg": kmh(v("FF")), "wg_boe": kmh(v("FFX")), "wr": num(v("DD")),
-                    "date": gj["timestamps"][-1]})
+        out.append(
+            {
+                "id": "TAWES-" + id,
+                "uuid": "TAWES-" + id,
+                "name": names[id][0],
+                "region": None,
+                "type": names[id][2],
+                "lon": round(f["geometry"]["coordinates"][0], 5),
+                "lat": round(f["geometry"]["coordinates"][1], 5),
+                "alt": names[id][1],
+                "hs": depth(v("SCHNEE")),
+                "n24": None,
+                "hsd24": None,
+                "lt": num(v("TL")),
+                "wg": kmh(v("FF")),
+                "wg_boe": kmh(v("FFX")),
+                "wr": num(v("DD")),
+                "date": gj["timestamps"][-1],
+            }
+        )
     return out
 
 
@@ -149,8 +207,15 @@ def tawes_history(gj, slot_keys):
         for k in slot_keys:
             if k + ":00" in ts:
                 i = ts.index(k + ":00")
-                add(out.setdefault(k, {x: {} for x in FIELDS}), "TAWES-" + f["properties"]["station"], hs=depth(col("SCHNEE")[i]),
-                    lt=num(col("TL")[i]), wg=kmh(col("FF")[i]), wg_boe=kmh(col("FFX")[i]), wr=num(col("DD")[i]))
+                add(
+                    out.setdefault(k, {x: {} for x in FIELDS}),
+                    "TAWES-" + f["properties"]["station"],
+                    hs=depth(col("SCHNEE")[i]),
+                    lt=num(col("TL")[i]),
+                    wg=kmh(col("FF")[i]),
+                    wg_boe=kmh(col("FFX")[i]),
+                    wr=num(col("DD")[i]),
+                )
     return out
 
 
@@ -196,29 +261,44 @@ LEVEL = {"low": 1, "moderate": 2, "considerable": 3, "high": 4, "very_high": 5}
 def parse_danger(bulletin, ids):
     out = {}
     for b in bulletin["bulletins"]:
-        rat = [{"level": LEVEL.get(r["mainValue"], 0),
+        rat = [
+            {
+                "level": LEVEL.get(r["mainValue"], 0),
                 "bound": "below" if "upperBound" in el else "above" if "lowerBound" in el else None,
-                "elevation": next(iter(el.values()), None), "period": r.get("validTimePeriod")}
-               for r in b["dangerRatings"] for el in [r.get("elevation") or {}]]
+                "elevation": next(iter(el.values()), None),
+                "period": r.get("validTimePeriod"),
+            }
+            for r in b["dangerRatings"]
+            for el in [r.get("elevation") or {}]
+        ]
         prob = [{"type": p["problemType"], "elevation": p.get("elevation"), "aspects": p.get("aspects", [])} for p in b.get("avalancheProblems", [])]
         for r in b["regions"]:
             if r["regionID"] in ids and r["regionID"] not in out:
-                out[r["regionID"]] = {"name": r["name"], "published": b["publicationTime"], "valid_start": b["validTime"]["startTime"],
-                                      "valid_end": b["validTime"]["endTime"], "ratings": rat, "problems": prob}
+                out[r["regionID"]] = {
+                    "name": r["name"],
+                    "published": b["publicationTime"],
+                    "valid_start": b["validTime"]["startTime"],
+                    "valid_end": b["validTime"]["endTime"],
+                    "ratings": rat,
+                    "problems": prob,
+                }
     return out
 
 
 def forecast(stations):
     days = [(datetime.now(TZ).date() + timedelta(days=i)).isoformat() for i in range(5)]
     try:
-        q = "&".join([
-            "latitude=" + ",".join(str(s["lat"]) for s in stations),
-            "longitude=" + ",".join(str(s["lon"]) for s in stations),
-            "elevation=" + ",".join(str(s["alt"]) for s in stations),
-        ])
-        res = get_json("https://api.open-meteo.com/v1/forecast?" + q +
-                       "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max&hourly=snow_depth"
-                       "&forecast_days=5&timezone=Europe%2FVienna")
+        q = "&".join(
+            [
+                "latitude=" + ",".join(str(s["lat"]) for s in stations),
+                "longitude=" + ",".join(str(s["lon"]) for s in stations),
+                "elevation=" + ",".join(str(s["alt"]) for s in stations),
+            ]
+        )
+        res = get_json(
+            "https://api.open-meteo.com/v1/forecast?" + q + "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max&hourly=snow_depth"
+            "&forecast_days=5&timezone=Europe%2FVienna"
+        )
         res = res if isinstance(res, list) else [res]
         pts = {}
         for s, r in zip(stations, res):
@@ -227,8 +307,10 @@ def forecast(stations):
                 "snowfall": r["daily"]["snowfall_sum"],
                 "tmin": r["daily"]["temperature_2m_min"],
                 "tmax": r["daily"]["temperature_2m_max"],
-                "depth": [None if all(v is None for v in depth[i*24:(i+1)*24]) else
-                          round(100 * max(v for v in depth[i*24:(i+1)*24] if v is not None)) for i in range(5)],
+                "depth": [
+                    None if all(v is None for v in depth[i * 24 : (i + 1) * 24]) else round(100 * max(v for v in depth[i * 24 : (i + 1) * 24] if v is not None))
+                    for i in range(5)
+                ],
             }
         return {"source": "Open-Meteo", "days": days, "points": pts}
     except Exception as e:
@@ -283,8 +365,15 @@ def main(days):
         for f in feats:
             if f["id"] in by_uuid:
                 p, st = f["properties"], by_uuid[f["id"]]
-                add(maps, st["id"], hs=depth(p.get("HS")) if st["type"] == "snow" else None, lt=num(p.get("LT")),
-                    wg=num(p.get("WG")), wg_boe=num(p.get("WG_BOE")), wr=num(p.get("WR")))
+                add(
+                    maps,
+                    st["id"],
+                    hs=depth(p.get("HS")) if st["type"] == "snow" else None,
+                    lt=num(p.get("LT")),
+                    wg=num(p.get("WG")),
+                    wg_boe=num(p.get("WG_BOE")),
+                    wr=num(p.get("WR")),
+                )
         merge(readings, s.strftime("%Y-%m-%dT%H"), s.isoformat(), maps)  # merge: keep other sources' ids (TAWES)
     try:  # TAWES values at the slot times, one historical request
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
@@ -342,58 +431,141 @@ def selftest():
     assert snapshot_url(s).endswith("2026-11-19_06-00_stations.geojson")
     assert snapshot_url(datetime(2026, 7, 1, 7, tzinfo=TZ)).endswith("2026-07-01_05-00_stations.geojson")  # summer time
     assert [x.hour for x in slots(1, datetime(2026, 11, 19, 13, tzinfo=TZ))] == [7, 12]
-    ts = [{"time": "2026-11-19T10:00:00Z", "data": {"instant": {"details": {"air_temperature": -3}},
-                                                     "next_1_hours": {"details": {"precipitation_amount": 2}}}},
-          {"time": "2026-11-19T11:00:00Z", "data": {"instant": {"details": {"air_temperature": 3}},
-                                                     "next_1_hours": {"details": {"precipitation_amount": 5}}}}]
+    ts = [
+        {"time": "2026-11-19T10:00:00Z", "data": {"instant": {"details": {"air_temperature": -3}}, "next_1_hours": {"details": {"precipitation_amount": 2}}}},
+        {"time": "2026-11-19T11:00:00Z", "data": {"instant": {"details": {"air_temperature": 3}}, "next_1_hours": {"details": {"precipitation_amount": 5}}}},
+    ]
     assert daily_snow_from_metno(ts, ["2026-11-19"]) == {"2026-11-19": [2.0, -3, 3]}
-    f = {"id": "u", "geometry": {"coordinates": [10.3, 47.1, 2400.7]},
-         "properties": {"LWD-Nummer": "SKAP1", "name": "W", "HS": None, "LT": -3.44, "WG": 46.352, "WG_BOE": 83.484, "WR": 222.655}}
+    f = {
+        "id": "u",
+        "geometry": {"coordinates": [10.3, 47.1, 2400.7]},
+        "properties": {"LWD-Nummer": "SKAP1", "name": "W", "HS": None, "LT": -3.44, "WG": 46.352, "WG_BOE": 83.484, "WR": 222.655},
+    }
     st = station(f)
     assert (st["type"], st["lt"], st["wg"], st["wg_boe"], st["wr"], st["hs"], st["alt"], st["hsd24"]) == ("wind", -3.4, 46.4, 83.5, 222.7, None, 2400, None)
     assert station({**f, "properties": {"name": "S", "HS": 3}, "id": "c9b477f0-c934-013d-99fc-5af9cc682f9b"})["type"] == "snow"
     assert depth(-5.2) == 0.0 and depth(None) is None
-    bl = {"bulletins": [{"publicationTime": "p", "validTime": {"startTime": "a", "endTime": "e"},
-                         "dangerRatings": [{"mainValue": "low", "elevation": {"upperBound": "2600"}, "validTimePeriod": "all_day"},
-                                           {"mainValue": "considerable", "elevation": {"lowerBound": "2600"}, "validTimePeriod": "all_day"},
-                                           {"mainValue": "moderate", "elevation": {"lowerBound": "treeline"}}, {"mainValue": "low", "elevation": None},
-                                           {"mainValue": "no_snow"}],
-                         "avalancheProblems": [{"problemType": "wet_snow", "elevation": {"lowerBound": "2500"}, "aspects": ["S"]}],
-                         "regions": [{"name": "X", "regionID": "AT-07-07"}, {"name": "Y", "regionID": "AT-07-99"}]}]}
+    bl = {
+        "bulletins": [
+            {
+                "publicationTime": "p",
+                "validTime": {"startTime": "a", "endTime": "e"},
+                "dangerRatings": [
+                    {"mainValue": "low", "elevation": {"upperBound": "2600"}, "validTimePeriod": "all_day"},
+                    {"mainValue": "considerable", "elevation": {"lowerBound": "2600"}, "validTimePeriod": "all_day"},
+                    {"mainValue": "moderate", "elevation": {"lowerBound": "treeline"}},
+                    {"mainValue": "low", "elevation": None},
+                    {"mainValue": "no_snow"},
+                ],
+                "avalancheProblems": [{"problemType": "wet_snow", "elevation": {"lowerBound": "2500"}, "aspects": ["S"]}],
+                "regions": [{"name": "X", "regionID": "AT-07-07"}, {"name": "Y", "regionID": "AT-07-99"}],
+            }
+        ]
+    }
     d = parse_danger(bl, {"AT-07-07"})
     assert list(d) == ["AT-07-07"] and d["AT-07-07"]["valid_end"] == "e" and d["AT-07-07"]["problems"][0]["type"] == "wet_snow"
-    assert [(r["level"], r["bound"], r["elevation"]) for r in d["AT-07-07"]["ratings"]] == [(1, "below", "2600"), (3, "above", "2600"), (2, "above", "treeline"), (1, None, None), (0, None, None)]
-    gj = {"timestamps": ["2026-11-19T05:50+00:00", "2026-11-19T06:00+00:00"], "features": [
-        {"geometry": {"coordinates": [10.23, 47.13]}, "properties": {"station": "11110", "parameters": {
-            "SCHNEE": {"data": [None, None]}, "TL": {"data": [-1, -2.1]}, "FF": {"data": [1, 5.5]}, "FFX": {"data": [2, 9.6]}, "DD": {"data": [1, 273.0]}}}},
-        {"geometry": {"coordinates": [10.27, 47.13]}, "properties": {"station": "11311", "parameters": {
-            "SCHNEE": {"data": [7.0, 0.0]}, "TL": {"data": [1, 2.9]}, "FF": {"data": [0.2, None]}, "FFX": {"data": [2, 1.9]}, "DD": {"data": [1, 226.0]}}}}]}
+    assert [(r["level"], r["bound"], r["elevation"]) for r in d["AT-07-07"]["ratings"]] == [
+        (1, "below", "2600"),
+        (3, "above", "2600"),
+        (2, "above", "treeline"),
+        (1, None, None),
+        (0, None, None),
+    ]
+    gj = {
+        "timestamps": ["2026-11-19T05:50+00:00", "2026-11-19T06:00+00:00"],
+        "features": [
+            {
+                "geometry": {"coordinates": [10.23, 47.13]},
+                "properties": {
+                    "station": "11110",
+                    "parameters": {
+                        "SCHNEE": {"data": [None, None]},
+                        "TL": {"data": [-1, -2.1]},
+                        "FF": {"data": [1, 5.5]},
+                        "FFX": {"data": [2, 9.6]},
+                        "DD": {"data": [1, 273.0]},
+                    },
+                },
+            },
+            {
+                "geometry": {"coordinates": [10.27, 47.13]},
+                "properties": {
+                    "station": "11311",
+                    "parameters": {
+                        "SCHNEE": {"data": [7.0, 0.0]},
+                        "TL": {"data": [1, 2.9]},
+                        "FF": {"data": [0.2, None]},
+                        "FFX": {"data": [2, 1.9]},
+                        "DD": {"data": [1, 226.0]},
+                    },
+                },
+            },
+        ],
+    }
     g, a = parse_tawes(gj, TAWES)
     assert (g["id"], g["type"], g["hs"], g["wg"], g["wg_boe"], g["wr"], g["lt"], g["alt"]) == ("TAWES-11110", "wind", None, 19.8, 34.6, 273.0, -2.1, 2079)
     assert (a["type"], a["hs"], a["wg"]) == ("snow", 0.0, 0.7)
-    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {"2026-11-19T07": {  # 06:00 UTC = 07:00 CET; Galzig has no snow, 11311 no FF
-        "hs": {"TAWES-11311": 0.0}, "lt": {"TAWES-11110": -2.1, "TAWES-11311": 2.9}, "wg": {"TAWES-11110": 19.8},
-        "wg_boe": {"TAWES-11110": 34.6, "TAWES-11311": 6.8}, "wr": {"TAWES-11110": 273.0, "TAWES-11311": 226.0}}}
+    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {
+        "2026-11-19T07": {  # 06:00 UTC = 07:00 CET; Galzig has no snow, 11311 no FF
+            "hs": {"TAWES-11311": 0.0},
+            "lt": {"TAWES-11110": -2.1, "TAWES-11311": 2.9},
+            "wg": {"TAWES-11110": 19.8},
+            "wg_boe": {"TAWES-11110": 34.6, "TAWES-11311": 6.8},
+            "wr": {"TAWES-11110": 273.0, "TAWES-11311": 226.0},
+        }
+    }
     no = {"hs": {}, "lt": {}, "wg": {}, "wg_boe": {}, "wr": {}}
     old = {"2026-11-19T07": {"t": "x", "hs": {"A": 1.0}}}  # old slot without the new maps
     merge(old, "2026-11-19T07", "t", {"hs": {"B": 2.0}, "lt": {"A": -1.0}})
     assert old == {"2026-11-19T07": {"t": "t", **no, "hs": {"A": 1.0, "B": 2.0}, "lt": {"A": -1.0}}}
-    vf = {"id": "v", "geometry": {"coordinates": [10.170777, 47.173592, 1920]}, "properties": {
-        "shortName": "ZURS1", "name": "Zürs Hexenboden", "microRegionID": "AT-08-03-01", "HS": 0.22, "HSD_24": 0.07,
-        "TA": 271.9, "VW": 9.9, "VW_MAX": 20.1, "DW": 237, "date": "2026-11-20 09:00:00+00:00"}}
+    vf = {
+        "id": "v",
+        "geometry": {"coordinates": [10.170777, 47.173592, 1920]},
+        "properties": {
+            "shortName": "ZURS1",
+            "name": "Zürs Hexenboden",
+            "microRegionID": "AT-08-03-01",
+            "HS": 0.22,
+            "HSD_24": 0.07,
+            "TA": 271.9,
+            "VW": 9.9,
+            "VW_MAX": 20.1,
+            "DW": 237,
+            "date": "2026-11-20 09:00:00+00:00",
+        },
+    }
     v = vor_station(vf)
-    assert (v["id"], v["type"], v["hs"], v["hsd24"], v["lt"], v["wg"], v["wg_boe"], v["wr"], v["alt"], v["region"]) == \
-        ("VOR-ZURS1", "snow", 22.0, 7.0, -1.2, 35.6, 72.4, 237.0, 1920, "AT-08-03-01")
+    assert (v["id"], v["type"], v["hs"], v["hsd24"], v["lt"], v["wg"], v["wg_boe"], v["wr"], v["alt"], v["region"]) == (
+        "VOR-ZURS1",
+        "snow",
+        22.0,
+        7.0,
+        -1.2,
+        35.6,
+        72.4,
+        237.0,
+        1920,
+        "AT-08-03-01",
+    )
     assert v["date"] == "2026-11-20T10:00:00+01:00"
     assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A", "date": "2026-11-20 09:00:00+00:00"}})["lt"] is None
-    smet = ("SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
-            "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n")
+    smet = (
+        "SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
+        "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n"
+    )
     assert smet_history(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # no VW_MAX/DW columns; nodata per field
-        "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0}, "2026-11-19T12": {"lt": -2.1},
-        "2026-11-19T17": {"hs": 0.0, "lt": -3.1, "wg": 1.8}}
-    sm2 = smet.replace("2026-11-19T11:00:00Z 271.0 -999 -999", "2026-11-19T11:00:00Z 271.0 abc").replace("2026-11-19T16:00:00Z 270.0 -0.01 0.5", "2026-11-19T16:00:00Z 270.1 0.15")
+        "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0},
+        "2026-11-19T12": {"lt": -2.1},
+        "2026-11-19T17": {"hs": 0.0, "lt": -3.1, "wg": 1.8},
+    }
+    sm2 = smet.replace("2026-11-19T11:00:00Z 271.0 -999 -999", "2026-11-19T11:00:00Z 271.0 abc").replace(
+        "2026-11-19T16:00:00Z 270.0 -0.01 0.5", "2026-11-19T16:00:00Z 270.1 0.15"
+    )
     assert smet_history(sm2, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # short row and non-numeric cell keep other fields
-        "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0}, "2026-11-19T12": {"lt": -2.1}, "2026-11-19T17": {"hs": 15.0, "lt": -3.0}}
+        "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0},
+        "2026-11-19T12": {"lt": -2.1},
+        "2026-11-19T17": {"hs": 15.0, "lt": -3.0},
+    }
     print("selftest ok")
 
 

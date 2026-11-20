@@ -9,10 +9,10 @@ Live page: https://osk-1.github.io/ski-dashboard/
 
 1. A GitHub Actions workflow (`.github/workflows/fetch.yml`) runs `fetch.py` at about 07:10, 12:10 and
    17:10 Vienna time (GitHub can delay scheduled runs by 10–30 min) and commits the results in `data/`:
-   - `stations.json`: current readings per station (see below)
-   - `forecast.json`: 5-day snowfall and min/max temperature per station
+   - `stations.json`: `updated` (time of the run) and `stations`, the current readings per station (see below)
+   - `forecast.json`: `source`, `generated`, `days` and `points` (`{stationId: {snowfall, tmin, tmax, depth}}`: 5-day snowfall cm, min/max temperature °C, modelled snow depth cm)
    - `readings.json`: `{slot: {t, hs, lt, wg, wg_boe, wr}}` at every 07/12/17 slot (the history, last 60 days), each a `{stationId: value}` map for all stations including wind-only ones; units as above, null values omitted
-   - `danger.json`: avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`, and from the Vorarlberg bulletin `AT-08-03-01`, `AT-08-03-02`, `AT-08-04`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current. The Vorarlberg bulletin 404s until its first bulletin of the season (usually early December); a bulletin that fails keeps its regions from the last run
+   - `danger.json`: `source`, `generated` and `regions`, the avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`, and from the Vorarlberg bulletin `AT-08-03-01`, `AT-08-03-02`, `AT-08-04`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems` (`type`, `elevation`, `aspects`), `name`, `published`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current. The Vorarlberg bulletin 404s until its first bulletin of the season (usually early December); a bulletin that fails keeps its regions from the last run
 2. GitHub Pages serves `index.html`, which reads those files.
 
 To record now: Actions tab → "Record snow data" → Run workflow.
@@ -49,3 +49,24 @@ Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`w
 python3 fetch.py --selftest
 python3 fetch.py --days 14   # backfill 14 days of 07/12/17 slots
 ```
+
+## Checks (CI)
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `fetch.py --selftest`), `js` (ESLint with the repo rules in `eslint-rules/`, `node --test`), `html` (html-validate, pinned + SRI check, secret scan, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
+
+Locally:
+
+```bash
+npm ci
+npm run lint && npm test        # JS, HTML and repo checks
+npx playwright test --trace off # smoke test; screenshots in test-results/
+pip install -r requirements-dev.txt && ruff check . && ruff format --check .
+```
+
+Custom rules: no `spanGaps: true` (ESLint), `localStorage`/`sessionStorage` only inside `try` (`eslint-rules/storage-in-try.js`), every external script/stylesheet pinned and with `integrity` (`scripts/check-sri.mjs`), every data field in this README (`scripts/check-readme-fields.mjs`), no tokens in the repo (`scripts/check-secrets.mjs`).
+
+### Require CI before merge (repo owner, one-time)
+
+The files in `.github/rulesets/` are only copies; a ruleset takes effect once applied: Settings → Rules → Rulesets → New ruleset → Import a ruleset, pick the file, check that Enforcement is Active.
+`protect-branches.json` (all branches: no force-push, creation or deletion) stays as it is. `require-ci.json` adds, for `main` only, a required pull request and the `python`, `js`, `html`, `workflows` and `smoke` checks (names = the job ids in `ci.yml`); repository admins can still bypass.
+**Apply `require-ci.json` only after the data workflow no longer pushes to `main`** (it still does today, and the Actions bot cannot bypass a required pull request).
