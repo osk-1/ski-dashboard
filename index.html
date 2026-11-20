@@ -202,9 +202,11 @@ function renderDanger() {
   const rs = Object.entries(state.danger?.regions || {}), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
   box.hidden = top.hidden = !rs.length;
   if (!rs.length) return;
-  const old = new Date(rs[0][1].valid_end) < new Date();
-  const day = new Date(rs[0][1].valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
-  const mx = Math.max(0, ...rs.flatMap(([, r]) => r.ratings.map(x => x.level)));
+  // per region: one bulletin can be current while the other is a leftover from an earlier run
+  const stale = r => new Date(r.valid_end) < new Date(), cur = rs.filter(([, r]) => !stale(r)), old = !cur.length;
+  const fmt = r => new Date(r.valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
+  const day = fmt(rs[0][1]);
+  const mx = Math.max(0, ...(old ? rs : cur).flatMap(([, r]) => r.ratings.map(x => x.level)));
   top.className = "meta" + (old ? " old" : "");
   top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
   box.className = "panel" + (old ? " old" : "");
@@ -213,7 +215,8 @@ function renderDanger() {
     for (const x of r.ratings) { const k = x.bound + x.elevation; if (!by[k] || x.level > by[k].level) by[k] = x; }
     const parts = Object.values(by).sort((a, b) => (a.bound === "below") - (b.bound === "below")).map(x => dchip(x.level, x.bound ? `${x.bound} ${esc(x.elevation)}${isNaN(x.elevation) ? "" : " m"}` : ""));
     const pr = [...new Set(r.problems.map(p => p.type.replace(/_/g, " ")))].map(esc).join(", ");
-    return `<div><b>${esc(r.name)}</b> ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
+    const note = !old && stale(r) ? ` <span class="meta">last bulletin ${fmt(r)}, not current</span>` : "";
+    return `<div${note ? ' class="old"' : ""}><b>${esc(r.name)}</b>${note} ${parts.join(" ")}${pr ? `<span class="meta">${pr}</span>` : ""}</div>`;
   }).join("");
 }
 
