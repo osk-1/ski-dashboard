@@ -172,7 +172,7 @@ a { color: var(--accent); }
   <div class="grid2">
     <section class="panel">
       <h2 id="histTitle">History</h2>
-      <div class="chartbox"><canvas id="hist" aria-label="Snow height history chart"></canvas></div>
+      <div class="chartbox"><canvas id="hist" aria-label="History chart"></canvas></div>
       <p class="src" id="histNote"></p>
     </section>
     <section class="panel">
@@ -426,27 +426,47 @@ function renderCharts() {
   if (!s || typeof Chart === "undefined") return;
   chartDefaults();
   const accent = css("--accent"), soft = css("--accent-soft");
-  const hist = state.readings.map(r => ({ x: fmtSlot(r.t), y: r.hs[s.id] ?? null }));
+  const wind = s.type === "wind", warm = css("--wind"), dim = c => `color-mix(in srgb, ${c} 45%, transparent)`;
+  const col = k => state.readings.map(r => r[k]?.[s.id] ?? null);
+  const hist = state.readings.map(r => ({ x: fmtSlot(r.t), y: r.hs?.[s.id] ?? null }));
+  const [lt, wg, gust, wr] = ["lt", "wg", "wg_boe", "wr"].map(col);
   const fp = state.forecast?.points?.[s.id];
   const days = state.forecast?.days || [];
   const dayLabel = d => new Date(d + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
-  const proj = fp?.depth ? days.map((d, i) => ({ x: dayLabel(d) + " (fc)", y: fp.depth[i] })) : [];
+  const proj = !wind && fp?.depth ? days.map((d, i) => ({ x: dayLabel(d) + " (fc)", y: fp.depth[i] })) : [];
   const labels = [...hist.map(p => p.x), ...proj.map(p => p.x)];
+  const pad = a => [...a, ...proj.map(() => null)];
+  const has = a => a.some(v => v != null), hasT = has(lt), hasW = has(wg);
+  const ln = (label, data, c, o = {}) => ({ label, data: pad(data), borderColor: c, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, spanGaps: true, tension: .25, ...o });
+  // arrows sit on y=0 pointing where the wind blows to, same rotation as the map arrows; calm/unknown -> no point
+  const arrowImg = to => { const c = document.createElement("canvas"); c.width = c.height = 18; const x = c.getContext("2d"); x.translate(9, 9); x.scale(.85, .85); x.rotate(to * Math.PI / 180); x.fillStyle = warm; x.fill(new Path2D("M0-10L6 2H2.5V10H-2.5V2H-6Z")); return c; };
+  const step = Math.ceil(wr.length / 40); // thin out so arrows do not overlap
+  const arrows = wr.map((d, i) => i % step || d == null || wg[i] == null || wg[i] < 1 ? null : arrowImg((d + 180) % 360));
+  const sets = wind ? [
+    ln("Mean wind (km/h)", wg, warm),
+    ln("Gusts (km/h)", gust, dim(warm), { borderWidth: 1.5 }),
+    { label: "Direction", data: pad(arrows.map(a => a && 0)), showLine: false, pointStyle: pad(arrows.map(a => a || "circle")), pointRadius: 9, pointHoverRadius: 9 },
+  ] : [
+    ln("Measured HS (cm)", hist.map(p => p.y), accent, { backgroundColor: soft, fill: "origin", tension: .25 }),
+    ...(hasT ? [ln("Temperature (°C)", lt, warm, { yAxisID: "y2", borderWidth: 1.5 })] : []),
+    ...(proj.length ? [{ label: "Forecast depth (cm)", data: [...hist.map(() => null), ...proj.map(p => p.y)], borderColor: accent, borderDash: [5, 4], borderWidth: 2, pointRadius: 4, fill: false }] : []),
+  ];
+  const shown = wind ? hasW : has(hist.map(p => p.y)) || hasT;
 
+  document.getElementById("hist").setAttribute("aria-label", wind ? "Wind history chart" : "Snow height and temperature history chart");
   document.getElementById("histTitle").textContent = `History · ${s.name}`;
-  document.getElementById("histNote").textContent = s.type === "wind" || s.type === "weather" ? "No snow height sensor at this station." : hist.length
-    ? `${hist.length} readings since ${hist[0].x}.` + (proj.length ? " Dashed line: modelled snow depth forecast." : "")
-    : "No history recorded yet.";
+  document.getElementById("histNote").textContent = !hist.length || (wind && !hasW) ? "No history recorded yet."
+    : wind ? `${hist.length} readings since ${hist[0].x}. Mean wind, gusts and direction (arrows point where the wind blows to).`
+    : `${hist.length} readings since ${hist[0].x}.` + (hasT ? " Orange line: air temperature (right axis, grid line at 0 °C)." : "") + (proj.length ? " Dashed line: modelled snow depth forecast." : "");
   charts.hist?.destroy();
   charts.hist = new Chart(document.getElementById("hist"), {
     type: "line",
-    data: { labels, datasets: [
-      { label: "Measured HS (cm)", data: hist.map(p => p.y), borderColor: accent, backgroundColor: soft, fill: "origin", borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, spanGaps: true, tension: .25 },
-      ...(proj.length ? [{ label: "Forecast depth (cm)", data: [...hist.map(() => null), ...proj.map(p => p.y)], borderColor: accent, borderDash: [5, 4], borderWidth: 2, pointRadius: 4, fill: false }] : []),
-    ] },
+    data: { labels, datasets: sets },
     options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: proj.length > 0 } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } }, y: { beginAtZero: true, title: { display: true, text: "cm" } } } },
+      plugins: { legend: { display: sets.length > (wind ? 2 : 1), labels: { filter: i => i.text !== "Direction" } },
+        tooltip: { filter: i => i.dataset.label !== "Direction", callbacks: { label: c => `${c.dataset.label.replace(/ \(.*/, "")}: ${c.parsed.y} ${c.dataset.label.match(/\((.*)\)/)[1]}`, afterBody: it => { const w = wr[it[0].dataIndex]; return wind && w != null ? `Wind from ${Math.round(w)}°` : ""; } } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } }, y: { beginAtZero: true, title: { display: true, text: wind ? "km/h" : "cm" }, ...(wind ? { grace: "8%", ticks: { callback: v => v < 0 ? "" : v } } : {}) },
+        ...(hasT && !wind ? { y2: { position: "right", title: { display: true, text: "°C" }, grid: { color: c => c.tick.value === 0 ? css("--fg") : "transparent", lineWidth: c => c.tick.value === 0 ? 1.5 : 0 } } } : {}) } },
   });
 
   document.getElementById("fcTitle").textContent = `5-day snowfall · ${s.name}`;
