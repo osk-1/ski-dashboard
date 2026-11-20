@@ -4,4 +4,7 @@ node_modules/
 test-results/
 playwright-report/
 .ruff_cache/
-data/
+data/stations.json
+data/forecast.json
+data/readings.json
+data/danger.json

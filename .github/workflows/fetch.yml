@@ -59,7 +59,7 @@ jobs:
           echo "run=$run" >> "$GITHUB_OUTPUT"
           echo "gate: run=$run"
       - name: Download live data
-        # data/ is no longer in git; download it from the live site (a leftover local copy is used as-is).
+        # The generated data files are no longer in git (regions.json is); download them from the live site.
         if: steps.gate.outputs.run == 'true' && hashFiles('data/readings.json') == ''
         run: |
           mkdir -p data
