@@ -18,8 +18,9 @@ SLOT_HOURS = (7, 12, 17)
 KEEP_DAYS = 60
 # Feed IDs (LWD-Nummer, or feature id when none): snow stations, then wind stations
 STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc682f9b", "KDIA2",
-            "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
-WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
+            "SARE2", "KSIN2", "KSPI2", "IPIS2", "aea1a765-2cff-3a00-bb88-3cfed1dfd875",
+            "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
+WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
 TAWES = {"11311": ("St. Anton (Tal)", 1304, "snow"), "11110": ("Galzig", 2079, "wind"), "11307": ("Langen/Arlberg", 1221, "snow")}  # GeoSphere TAWES id: (name, altitude m, type)

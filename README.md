@@ -19,8 +19,9 @@ To record now: Actions tab → "Record snow data" → Run workflow.
 
 ## Stations
 
-A fixed list (`STATIONS` in `fetch.py`, 6 snow + 5 wind stations: Ulmerhütte, Kapall, Äußere Rendlalpe, Gampberg,
-Kartellboden-Damm, Dias, Hochkar, Kappl Kapplerkopf, Lattejoch); a station missing from the feed is warned about on stderr.
+A fixed list (`STATIONS` in `fetch.py`, 11 snow + 9 wind stations: Ulmerhütte, Kapall, Äußere Rendlalpe, Gampberg,
+Kartellboden-Damm, Dias, Hochkar, Rendl Riffel 1, Kappl Sinsenergampen, Kappl Spidur Alpe, Pischgraben, Ganatschalm (snow);
+Kappl Kapplerkopf, Lattejoch, Osthangbahn Young, Salzboden, Kappl Großgfallkopf, Madleinkopf (wind) etc.; Kaisers, Zürs village, Gauderkopf and Albonagrat are not shown); a station missing from the feed is warned about on stderr.
 St. Anton (Tal), Galzig and Langen/Arlberg come from GeoSphere TAWES instead (`id` `TAWES-<id>`, `region` null; Galzig is wind-only, no snow gauge).
 Zürs Hexenboden, Lech/Arlberg, Lech Kriegerhorn, Langen Blasegg, Albona (snow) and Valluga (wind) come from LWD Vorarlberg (`VOR_IDS`, `id` `VOR-<shortName>`, `region` = micro-region such as `AT-08-03-01`; `n24` is always null).
 Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`wind`), `lon, lat, alt`,
