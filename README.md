@@ -11,7 +11,7 @@ Live page: https://osk-1.github.io/ski-dashboard/
    17:10 Vienna time (GitHub can delay scheduled runs by 10–30 min) and commits the results in `data/`:
    - `stations.json`: current readings per station (see below)
    - `forecast.json`: 5-day snowfall and min/max temperature per station
-   - `readings.json`: HS per station at every 07/12/17 slot (the history, last 60 days)
+   - `readings.json`: `{slot: {t, hs, lt, wg, wg_boe, wr}}` at every 07/12/17 slot (the history, last 60 days), each a `{stationId: value}` map for all stations including wind-only ones; units as above, null values omitted
    - `danger.json`: avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`, and from the Vorarlberg bulletin `AT-08-03-01`, `AT-08-03-02`, `AT-08-04`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current. The Vorarlberg bulletin 404s until its first bulletin of the season (usually early December); a bulletin that fails keeps its regions from the last run
 2. GitHub Pages serves `index.html`, which reads those files.
 
@@ -27,7 +27,7 @@ Zürs Hexenboden, Lech/Arlberg, Lech Kriegerhorn, Langen Blasegg, Albona (snow) 
 Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`wind`), `lon, lat, alt`,
 `hs` (snow height cm), `n24` (new snow 24 h cm), `hsd24` (HS change 24 h cm), `lt` (air temp °C),
 `wg` (mean wind km/h), `wg_boe` (gust km/h), `wr` (wind direction °), `date`. Missing values are `null`.
-`readings.json` records `hs` of snow stations only.
+`readings.json` slots recorded before the temperature/wind fields were added lack `lt`/`wg`/`wg_boe`/`wr`, and the Vorarlberg/TAWES backfill reaches back only about 7 days, so older temperature and wind history is empty.
 
 ## Data sources
 
