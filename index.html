@@ -148,12 +148,20 @@ a { color: var(--accent); }
 .dg1 { background: #ccff66; color: #142030; } .dg2 { background: #ffff00; color: #142030; } .dg3 { background: #ff9900; color: #142030; }
 .dg4 { background: #ff0000; color: #fff; } .dg5 { background: #000; color: #ff0000; border-color: #ff0000; } .dg0 { background: #9aa5b1; color: #142030; }
 .old .dg { opacity: .45; }
+.banner { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--wind); background: color-mix(in srgb, var(--wind) 14%, var(--panel)); font-weight: 500; }
+s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px; }
+.why { display: block; color: var(--muted); font-size: .72rem; font-weight: 400; line-height: 1.25; white-space: normal; min-width: 7em; }
+.strip .xl { flex-basis: 100%; grid-column: 1 / -1; margin: 0; }
+#map .val b.nd { color: var(--muted); font-weight: 500; font-style: italic; }
+#checksN { margin-left: 10px; }
+.checks { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: .9rem; }
 #danger { display: grid; gap: 6px; font-size: .9rem; } #danger div { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
 </style>
 </head>
 <body>
 
 <div class="wrap">
+  <div class="banner" id="banner" role="status" hidden></div>
   <header>
     <h1>Arlberg Snow Depth</h1>
     <div class="meta" id="updated">Loading station data…</div>
@@ -210,6 +218,11 @@ a { color: var(--accent); }
     </section>
   </div>
   </div>
+
+  <details class="panel" id="checks">
+    <summary><h2>Data checks</h2><span class="meta" id="checksN"></span></summary>
+    <ul class="checks" id="checkList"><li>Loading…</li></ul>
+  </details>
 
   <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Lech, Zürs, Langen Blasegg, Albona and Valluga: <a href="https://warnung.vorarlberg.at" target="_blank" rel="noopener">Lawinenwarndienst Vorarlberg</a>. Avalanche danger: Euregio bulletin (avalanche.report) and LWD Vorarlberg bulletin. St. Anton, Galzig and Langen/Arlberg: <a href="https://data.hub.geosphere.at" target="_blank" rel="noopener">GeoSphere Austria (CC BY 4.0)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
 </div>

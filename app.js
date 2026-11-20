@@ -9,7 +9,7 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
 const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
 
-let state = { stations: [], readings: [], forecast: null, danger: null, regions: null, hourly: null, selected: null };
+let state = { stations: [], readings: [], forecast: null, danger: null, regions: null, hourly: null, health: null, updated: null, selected: null };
 let condH = 24;
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
@@ -23,9 +23,18 @@ function delta24(id) {
   return a == null || b == null ? null : Math.round(a - b);
 }
 
+// accuracy (#42): words for what is wrong with a value, never the value itself
+const FN = { hs: "snow height", n24: "new snow 24 h", hsd24: "24 h change", lt: "air temp", oft: "snow surface", rh: "humidity", wg: "wind", wg_boe: "gusts", wr: "wind direction" };
+const fmtLast = t => viennaKey(t).slice(0, 10) === viennaKey(Date.now()).slice(0, 10) ? fmtHour(t) : fmtSlot(t);
+const badText = v => v.suspect ? `suspect: ${v.reason}` : `no recent data (last ${fmtLast(v.last)})`;
+const isBad = v => !v.ok && !v.missing;
+const badList = bad => Object.entries(Object.groupBy(Object.entries(bad), ([, v]) => badText(v))).map(([t, fs]) => `${fs.map(([f]) => FN[f]).join(", ")}: ${t}`).join("; ");
+
 function renderSummary() {
-  const s = shown().filter(x => x.hs != null);
-  if (!s.length) { document.getElementById("summary").innerHTML = '<div class="stat"><b>–</b><span>No snow stations shown</span></div>'; return; }
+  const sh = shown(), s = sh.filter(x => x.hs != null), ex = sh.filter(x => x.bad.hs).length;
+  const left = sh.filter(x => Object.keys(x.bad).length).map(x => `${esc(x.name)} (${esc(badList(x.bad))})`);
+  const note = left.length ? `<p class="src xl">Excluded as not current or suspect: ${left.join(" · ")}.</p>` : "";
+  if (!s.length) { document.getElementById("summary").innerHTML = '<div class="stat"><b>–</b><span>No snow stations shown</span></div>' + note; return; }
   const deep = s.reduce((a, b) => b.hs > a.hs ? b : a);
   const avg = s.reduce((a, b) => a + b.hs, 0) / s.length;
   const ds = s.map(x => delta24(x.id)).filter(x => x != null);
@@ -34,10 +43,10 @@ function renderSummary() {
   const fcSum = fc ? Math.round(fc.reduce((a, b) => a + (b || 0), 0)) : null;
   document.getElementById("summary").innerHTML = [
     [`${Math.round(deep.hs)} cm`, `Deepest · ${esc(deep.name)}`],
-    [`${Math.round(avg)} cm`, `Average of ${s.length} stations`],
+    [`${Math.round(avg)} cm`, `Average of ${s.length}${ex ? ` · ${ex} excluded` : " stations"}`],
     [dAvg == null ? "–" : `${dAvg > 0 ? "+" : ""}${dAvg} cm`, "Avg change 24 h"],
-    [fcSum == null ? "–" : `${fcSum} cm`, "New snow next 5 days"],
-  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+    [fcSum == null ? "–" : `${fcSum} cm`, "Model new snow, 5 days"],
+  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("") + note;
 }
 
 const DG = ["No rating", "Low", "Moderate", "Considerable", "High", "Very high"];
@@ -77,7 +86,8 @@ let lay = { on: {}, hide: [] }; // hide: station ids, so new stations default to
 try { const j = JSON.parse(localStorage.getItem("layers")); if (j) { if (typeof j.on === "object" && j.on) lay.on = j.on; if (Array.isArray(j.hide)) lay.hide = j.hide; if (typeof j.nsh === "number") lay.nsh = j.nsh; } } catch {}
 const vis = s => lay.on[catOf(s)] && !lay.hide.includes(s.id); // dot, label, table row, summary
 const arrowVis = s => arrowOn(s) && s.type !== "wind" && lay.on.wind && !lay.hide.includes(s.id); // small wind arrow above a snow/weather dot
-const shown = () => state.stations.filter(vis);
+const placed = () => state.stations.filter(s => !misplaced(s)); // a station reported somewhere else is not shown at all
+const shown = () => placed().filter(vis).map(s => goodOnly(s, Date.now())); // map and summary: good values only, the rest null with the reason in .bad
 for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phone() || k === "snow"; // defaults: phone shows snow only; a saved choice wins
 lay.on.newsnow ??= false; lay.nsh ??= 24; // off everywhere: it fetches extra images
 // New-snow overlay (avalanche.report): config loaded on first enable; nsEnd = selected period end (ms, UTC); nsImg caches url -> reprojected data URL
@@ -157,7 +167,7 @@ function initMap() {
     b.type = "button"; b.title = "Map layers"; b.setAttribute("aria-label", "Map layers"); b.setAttribute("aria-controls", "lp");
     b.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 15 5.5 8 9.5 1 5.5ZM1 8.5l7 4 7-4"/></svg>';
     p.id = "lp"; p.hidden = true; b.setAttribute("aria-expanded", !p.hidden);
-    const stn = c => state.stations.filter(s => catOf(s) === c).sort((a, b) => b.alt - a.alt);
+    const stn = c => placed().filter(s => catOf(s) === c).sort((a, b) => b.alt - a.alt);
     const row = (attr, id, text, extra = "") => `<label><input type="checkbox" ${attr}="${esc(id)}"> <span>${esc(text)}${extra}</span></label>`;
     const stale = Object.values(state.danger?.regions || {}).some(r => new Date(r.valid_end) < new Date());
     p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : [], row("data-cat", "newsnow", "New snow", ' <small id="nsn"></small>') + '<div class="ns" id="nsx"></div>', row("data-cat", "peaks", "Peaks")].join("") +
@@ -224,7 +234,8 @@ function renderMap() {
   ctl.push([cb.left - mb.left, cb.top - mb.top, cb.right - mb.left, cb.bottom - mb.top]);
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * ctl.reduce((c, q) => c + overlap(r, q), 0) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
   const stationBoxes = [];
-  for (const s of state.stations) { const { x, y } = at(s.lat, s.lon); if (vis(s)) stationBoxes.push([x - 14, y - 14, x + 14, y + 14]); if (arrowVis(s)) stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
+  const all = placed().map(s => goodOnly(s, Date.now()));
+  for (const s of all) { const { x, y } = at(s.lat, s.lon); if (vis(s)) stationBoxes.push([x - 14, y - 14, x + 14, y + 14]); if (arrowVis(s)) stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
   const taken = [...stationBoxes];
   for (const lm of landmarks) {
     if (lm.pk) { map[lay.on.peaks ? "addLayer" : "removeLayer"](lm.marker); if (!lay.on.peaks) continue; }
@@ -238,7 +249,8 @@ function renderMap() {
   let focusEl;
   for (const s of shown().sort((a, b) => b.lat - a.lat)) {
     const sel = s.id === state.selected, wo = s.type === "wind", wx = s.type === "weather", wind = hasWind(s), grp = groups[catOf(s)];
-    const val = wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : wx ? (s.lt == null ? "–" : s.lt + " °C") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
+    const bad = s.bad[wo ? "wg" : wx ? "lt" : "hs"];
+    const val = bad ? badText(bad) : wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : wx ? (s.lt == null ? "–" : s.lt + " °C") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
     const { x, y } = at(s.lat, s.lon);
     // direction + offset: beside the dot first, then the four diagonals, then below and above
     const spots = [["right", [10, 0]], ["left", [-10, 0]], ["right", [8, 17]], ["right", [8, -17]], ["left", [-8, 17]], ["left", [-8, -17]], ["bottom", [0, 12]], ["top", [0, -12]]];
@@ -257,29 +269,32 @@ function renderMap() {
     // wind-only: just the arrow (or a calm ring) centred in a 44px box, haloed when selected; snow stations keep the coloured dot
     const m = wo ? L.marker([s.lat, s.lon], { keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [44, 44], iconAnchor: [22, 22], html: `<svg width="44" height="44" viewBox="-22 -22 44 44"><circle r="13" fill="${sel ? css("--panel") : "transparent"}"${sel ? ` stroke="${css("--fg")}" stroke-width="3"` : ""}/>${arrowOn(s) ? arrow(0, 0, (s.wr + 180) % 360, css("--wind")) : `<circle r="4.5" fill="${css("--panel")}" stroke="${css("--wind")}" stroke-width="2"/>`}</svg>` }) }).addTo(grp)
       : L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1, bubblingMouseEvents: false }).addTo(grp);
-    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
+    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b${bad ? ' class="nd"' : ""}>${esc(val)}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
     m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    t.textContent = `${s.name} · ${s.alt} m · ${wo ? "wind station" : wx ? "weather station" : (s.hs ?? "–") + " cm"}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
+    t.textContent = `${s.name} · ${s.alt} m · ${wo ? "wind station" : wx ? "weather station" : val}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
     if (wo) el.title = t.textContent; else el.append(t); // SVG paths take a <title>, the HTML wind icon a title attribute
     el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); el.dataset.sid = s.id;
-    el.setAttribute("aria-label", `${s.name}, ${wo ? (s.wg == null ? "no" : Math.round(s.wg) + " km/h wind") : wx ? (s.lt == null ? "no" : s.lt + " °C") : (s.hs ?? "no") + " cm"}`);
+    el.setAttribute("aria-label", `${s.name}, ${wo ? "wind " : ""}${val === "–" ? "no data" : val}`);
     el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(s.id); } });
     if (s.id === focusId) focusEl = el;
   }
-  for (const s of state.stations.filter(arrowVis)) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, s.id === state.selected && vis(s) ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
+  for (const s of all.filter(arrowVis)) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, s.id === state.selected && vis(s) ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
   focusEl?.focus();
 }
 
 function renderTable() {
   if (!state.stations.length) return;
-  const byAlt = (a, b) => b.alt - a.alt, rows = shown().sort(byAlt);
+  const byAlt = (a, b) => b.alt - a.alt, rows = placed().filter(vis).sort(byAlt), now = Date.now();
+  // close reading: a value that is not current or suspect stays visible, greyed and struck through, with the reason
+  const st = (s, f) => valueState(s, f, now), strike = (v, t) => isBad(v) ? `<s class="bad">${t}</s>` : t;
+  const why = vs => { const t = [...new Set(vs.filter(isBad).map(badText))]; return t.length ? `<span class="why">${esc(t.join("; "))}</span>` : ""; };
   document.getElementById("rows").innerHTML = !rows.length ? '<tr><td colspan="5" class="empty">No stations selected on the map.</td></tr>' : rows.map(s => {
-    const d = delta24(s.id);
+    const d = delta24(s.id), hs = st(s, "hs"), wg = st(s, "wg"), gu = st(s, "wg_boe"), wr = st(s, "wr");
     return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
-      <td class="nm" title="${esc(s.name)}">${esc(s.name)}<small>${s.alt} m</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + '<span class="u"> cm</span>'}</b></td>
+      <td class="nm" title="${esc(s.name)}">${esc(s.name)}<small>${s.alt} m</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : strike(hs, Math.round(s.hs) + '<span class="u"> cm</span>')}</b>${why([hs])}</td>
       <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td>
-      <td class="n">${hasWind(s) ? `${arrowOn(s) ? `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span> ` : ""}${Math.round(s.wg)}${s.wg_boe != null ? " / " + Math.round(s.wg_boe) : ""}` : "–"}</td></tr>`;
+      <td class="n">${hasWind(s) ? `${arrowOn(s) ? strike(wr, `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span>`) + " " : ""}${strike(wg, Math.round(s.wg))}${s.wg_boe != null ? " / " + strike(gu, Math.round(s.wg_boe)) : ""}${why([wg, gu, wr])}` : "–"}</td></tr>`;
   }).join("");
   const sel = document.getElementById("stnSel");
   const opts = state.stations.filter(s => vis(s) || s.id === state.selected).sort(byAlt).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join(""); // the selected station stays listed even when hidden
@@ -304,7 +319,7 @@ function renderCharts() {
   const col = k => state.readings.map(r => r[k]?.[s.id] ?? null);
   const hist = state.readings.map(r => ({ x: fmtSlot(r.t), y: r.hs?.[s.id] ?? null }));
   const [lt, wg, gust, wr] = ["lt", "wg", "wg_boe", "wr"].map(col);
-  const fp = state.forecast?.points?.[s.id];
+  const fp = state.forecast?.points?.[s.id], fcSrc = `${state.forecast?.source || "source unknown"}, issued ${fmtSlot(state.forecast?.generated)}`;
   const days = state.forecast?.days || [];
   const dayLabel = d => new Date(d + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
   const proj = !wind && fp?.depth ? days.map((d, i) => ({ x: dayLabel(d) + " (fc)", y: fp.depth[i] })) : [];
@@ -323,14 +338,14 @@ function renderCharts() {
   ] : [
     ln("Measured HS (cm)", hist.map(p => p.y), accent, { backgroundColor: soft, fill: "origin", tension: .25 }),
     ...(hasT ? [ln("Temperature (°C)", lt, warm, { yAxisID: "y2", borderWidth: 1.5 })] : []),
-    ...(proj.length ? [{ label: "Forecast depth (cm)", data: [...hist.map(() => null), ...proj.map(p => p.y)], borderColor: accent, borderDash: [5, 4], borderWidth: 2, pointRadius: 4, fill: false }] : []),
+    ...(proj.length ? [{ label: "Forecast depth · model (cm)", data: [...hist.map(() => null), ...proj.map(p => p.y)], borderColor: accent, borderDash: [5, 4], borderWidth: 2, pointRadius: 4, fill: false }] : []),
   ];
 
   document.getElementById("hist").setAttribute("aria-label", wind ? "Wind history chart" : "Snow height and temperature history chart");
   document.getElementById("histTitle").textContent = `History · ${s.name}`;
   document.getElementById("histNote").textContent = !hist.length || (wind && !hasW) ? "No history recorded yet."
     : wind ? `${hist.length} readings since ${hist[0].x}. Mean wind, gusts and direction (arrows point where the wind blows to).`
-    : `${hist.length} readings since ${hist[0].x}.` + (hasT ? " Orange line: air temperature (right axis, grid line at 0 °C)." : "") + (proj.length ? " Dashed line: modelled snow depth forecast." : "");
+    : `${hist.length} readings since ${hist[0].x}.` + (hasT ? " Orange line: air temperature (right axis, grid line at 0 °C)." : "") + (proj.length ? ` Dashed line: model snow depth (${fcSrc}).` : "");
   charts.hist?.destroy();
   charts.hist = new Chart(document.getElementById("hist"), {
     type: "line",
@@ -342,17 +357,17 @@ function renderCharts() {
         ...(hasT && !wind ? { y2: { position: "right", title: { display: true, text: "°C" }, grid: { color: c => c.tick.value === 0 ? css("--fg") : "transparent", lineWidth: c => c.tick.value === 0 ? 1.5 : 0 } } } : {}) } },
   });
 
-  document.getElementById("fcTitle").textContent = `5-day snowfall · ${s.name}`;
+  document.getElementById("fcTitle").textContent = `5-day snowfall (model) · ${s.name}`;
   charts.fc?.destroy();
   if (!fp) { document.getElementById("fcSource").textContent = "No forecast stored yet."; return; }
   const t0 = v => v == null ? "–" : Math.round(v);
   charts.fc = new Chart(document.getElementById("fc"), {
     type: "bar",
-    data: { labels: days.map((d, i) => [dayLabel(d), `${t0(fp.tmin[i])}° / ${t0(fp.tmax[i])}°`]), datasets: [{ label: "New snow (cm)", data: fp.snowfall, backgroundColor: accent, borderRadius: 4, maxBarThickness: 44 }] },
-    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y ?? 0} cm new snow` } } },
+    data: { labels: days.map((d, i) => [dayLabel(d), `${t0(fp.tmin[i])}° / ${t0(fp.tmax[i])}°`]), datasets: [{ label: "New snow · model (cm)", data: fp.snowfall, backgroundColor: accent, borderRadius: 4, maxBarThickness: 44 }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y ?? 0} cm new snow (model)` } } },
       scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: false, font: { size: 11 } } }, y: { beginAtZero: true, title: { display: true, text: "cm" } } } },
   });
-  document.getElementById("fcSource").textContent = `Under each day: min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
+  document.getElementById("fcSource").textContent = `Model: ${fcSrc}. Under each day: model min / max °C at station altitude.`;
 }
 
 const fmtHour = (t, day) => new Date(t).toLocaleString("en-GB", { ...(day ? { weekday: "short", day: "numeric" } : { hour: "2-digit", minute: "2-digit" }), timeZone: "Europe/Vienna" });
@@ -375,14 +390,18 @@ function renderCond(s) {
   el("condBox").hidden = condH === 1; el("condNow").hidden = condH !== 1; el("condRh").parentNode.hidden = condH === 1;
   if (condH === 1) {
     el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now);
-      return `<div class="stat"><b>${v ? `${esc(v.y)} ${u}` : "–"}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}</small></div>`; }).join("");
+      const fl = v && hours[v.k].flags?.[id]?.[f], t = v ? `${esc(v.y)} ${u}` : "–";
+      return `<div class="stat"><b>${fl ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}${fl ? ` · suspect: ${esc(fl)}` : ""}</small></div>`; }).join("");
     el("condNote").textContent = `Latest measured values (${srcOf(id)}), with their measurement times.`;
     return;
   }
   const from = now - condH * 3600e3, to = now + condH * 3600e3, past = f => slice(hours, f, id, from, now), fut = f => slice(hours, f, id, now + 1, to);
   const nn = a => a.some(p => p.y != null);
   const warm = css("--wind"), accent = css("--accent"), rain = css("--snow-2"), rainM = css("--snow-3"), muted = css("--muted");
-  const ln = (f, label, unit, c, o = {}) => ({ label, unit, src: `measured · ${srcOf(id)}`, data: past(f), borderColor: c, backgroundColor: c, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
+  // flagged hours (hourly.json hours[k].flags) are drawn faded, with a dot, and the tooltip names the reason
+  const fade = c => `color-mix(in srgb, ${c} 30%, transparent)`, flagAt = x => x.chart.data.datasets[x.datasetIndex].data[x.p0DataIndex]?.fl || x.chart.data.datasets[x.datasetIndex].data[x.p1DataIndex]?.fl;
+  const ln = (f, label, unit, c, o = {}) => ({ label, unit, src: `measured · ${srcOf(id)}`, data: past(f).map(p => ({ ...p, fl: hours[p.k]?.flags?.[id]?.[f] })), borderColor: c, backgroundColor: c, borderWidth: 2,
+    pointRadius: x => x.raw?.fl ? 3 : 0, pointBackgroundColor: fade(c), pointBorderColor: fade(c), segment: { borderColor: x => flagAt(x) ? fade(c) : undefined }, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
   const lt = ln("lt", "Air", "°C", warm), mt = { ...ln("mt", "Air · model", "°C", warm, { borderDash: [5, 4], borderWidth: 1.5, src: modelSrc }), data: fut("mt") };
   const oft = hasOft && ln("oft", "Snow surface", "°C", accent);
   const rh = el("condRh").checked && ln("rh", "Humidity", "%", muted, { borderWidth: 1, yAxisID: "yH" });
@@ -404,7 +423,7 @@ function renderCond(s) {
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearest", axis: "x", intersect: false },
       plugins: { legend: { labels: { boxWidth: 14, boxHeight: 8, font: { size: 11 } } },
         tooltip: { filter: i => i.parsed.y != null, callbacks: { title: it => fmtSlot(it[0].parsed.x),
-          label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.sm != null ? ` (snow ${c.raw.sm} cm)` : ""}`,
+          label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.sm != null ? ` (snow ${c.raw.sm} cm)` : ""}${c.raw.fl ? ` · suspect: ${c.raw.fl}` : ""}`,
           footer: it => [...new Set(it.map(i => i.dataset.src))] } } },
       scales: {
         x: { type: "linear", min: from, max: to, grid: { display: false },
@@ -422,13 +441,40 @@ function renderCond(s) {
     d ? `Daytime max (${day(d.date)}, 08–18 h): ${t(d.at)} (${cnt(d)}).` : "No air temperature for the last complete day.",
     ...(hasOft ? [fr ? (fr.ok ? `Snow surface refroze in the night from ${day(fr.date)} (below 0 °C in every hour with data, ${cnt(fr)}).` : `Snow surface didn't refreeze in the night from ${day(fr.date)} (${t(fr.warm)}, ${cnt(fr)}).`) : "No snow surface data for the last complete night."] : []),
     hasModel ? `Dashed / outlined: ${modelSrc}.` : "Model unavailable.",
+    ...(sets.some(d => d.data.some(p => p.fl)) ? ["Faded points failed a plausibility check (tap one for the reason)."] : []),
   ].join(" ");
 }
 
 // touch: drop the tooltip when the finger lifts; click comes last, after the emulated mousemove that would re-show it (listener on the canvas, which survives chart re-creation)
 for (const cid of ["hist", "cond"]) for (const ev of ["pointerup", "touchend", "click"]) document.getElementById(cid).addEventListener(ev, e => { const c = charts[cid]; if (!c || e.pointerType === "mouse" || (e.type === "click" && !e.pointerType)) return; setTimeout(() => { if (c !== charts[cid]) return; c.setActiveElements([]); c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update(); }, 50); }); // after Chart.js's own (rAF-throttled) event handling
 
-function renderAll() { renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); }
+// banner when the last successful refresh is too old (health.json run time, else stations.json updated)
+function renderBanner() {
+  const last = state.health?.run || state.updated, b = document.getElementById("banner");
+  b.hidden = !refreshStale(last, Date.now());
+  b.textContent = `Data may be out of date: the last successful refresh was ${last ? fmtSlot(last) : "unknown"}. Check the measurement times before relying on any value.`;
+}
+const WHY = { "out of range": "outside the possible range for this sensor", jump: "changed implausibly fast since the hour before", stuck: "the same value for 6 hours in a row",
+  "gust below mean": "gust lower than the mean wind", "sensor frozen?": "wind 0 for 3 hours in freezing, saturated air: the anemometer is probably iced up", "time in future": "measurement time is after the data run" };
+// every current flag, offline station, failed source and misplaced station, plus live staleness
+function renderChecks() {
+  const h = state.health, now = Date.now(), items = [], off = new Map((h?.offline || []).map(o => [o.id, o]));
+  for (const [k, v] of Object.entries(h?.sources || {})) if (!v.ok) items.push(`<b>Source ${esc(k)} failed</b> in the last run: ${esc(v.error || "unknown error")}${v.detail ? ` (${esc(v.detail)})` : ""}. Its stations keep their last values, which age as shown.`);
+  if (!h) items.push("Source status unavailable (no data checks file from the last run).");
+  for (const s of state.stations) if (!(now - Date.parse(s.date) <= offlineAfter)) off.set(s.id, { name: s.name, last: s.date });
+  for (const o of off.values()) items.push(`<b>${esc(o.name)}</b> offline: no measurement for over 24 h (last ${esc(fmtSlot(o.last))}).`);
+  for (const s of state.stations) {
+    if (misplaced(s)) { items.push(`<b>${esc(s.name)}</b> hidden from map, summary and table: location mismatch (reported position or name doesn't match the known station).`); continue; }
+    const parts = Object.entries(s.flags || {}).map(([f, r]) => [f, `suspect: ${r} (${WHY[r] || "plausibility check"})`]);
+    if (!off.has(s.id)) for (const f in staleAfter) { const v = valueState(s, f, now); if (v.stale) parts.push([f, `not current: last ${fmtLast(v.last)}, older than ${staleAfter[f] / 3600e3} h`]); }
+    const txt = Object.entries(Object.groupBy(parts, ([, t]) => t)).map(([t, fs]) => `${fs.map(([f]) => FN[f] || f).join(", ")} ${t}`);
+    if (txt.length) items.push(`<b>${esc(s.name)}</b>: ${esc(txt.join("; "))}.`);
+  }
+  document.getElementById("checksN").textContent = items.length ? `${items.length} note${items.length > 1 ? "s" : ""}` : "all clear";
+  document.getElementById("checkList").innerHTML = (items.length ? items : ["All values passed the checks."]).map(x => `<li>${x}</li>`).join("");
+}
+
+function renderAll() { renderBanner(); renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); renderChecks(); }
 
 function select(id) {
   state.selected = id;
@@ -464,10 +510,10 @@ async function load() {
   loading = true;
   const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
   try {
-    const [st, fc, rd, dg, rg, hr] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null)]);
+    const [st, fc, rd, dg, rg, hr, he] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null), get("health").catch(() => null)]);
     state.danger = dg; state.regions = rg;
     state.stations = st.stations || [];
-    state.forecast = fc; state.hourly = hr;
+    state.forecast = fc; state.hourly = hr; state.health = he; state.updated = st.updated;
     state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
     if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;

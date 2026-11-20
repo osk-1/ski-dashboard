@@ -28,10 +28,10 @@ const slice = (hours, field, id, from, to) => {
 };
 // newest recorded value of a field at or before `to`
 const latest = (hours, field, id, to) => { const lim = viennaKey(to), k = Object.keys(hours).sort().reverse().find(k => k <= lim && hours[k][field]?.[id] != null); return k ? { k, y: hours[k][field][id] } : null; };
+const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10); // "YYYY-MM-DD" + n days
 // the latest night (18:00-08:00) or day (08:00-18:00) that has ended by `now`, over its full length in hourly.json
 // { date (local date it starts on), pts with data, of = hours in the period (DST-aware, normally 14 / 10) }
 const period = (hours, field, id, now, night) => {
-  const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10);
   const span = d => night ? [keyMs(d + "T18"), keyMs(shift(d, 1) + "T08")] : [keyMs(d + "T08"), keyMs(d + "T18")];
   let d = viennaKey(now).slice(0, 10);
   while (span(d)[1] > now) d = shift(d, -1);
@@ -41,5 +41,24 @@ const period = (hours, field, id, now, night) => {
 const extreme = (hours, field, id, now, night) => { const p = period(hours, field, id, now, night); return p && { ...p, at: p.pts.reduce((a, b) => (night ? b.y < a.y : b.y > a.y) ? b : a) }; };
 // surface refroze: below 0 °C in every hour with data of the last complete night; null = no data that night
 const refroze = (hours, id, now) => { const p = period(hours, "oft", id, now, true); return p && { ...p, ok: p.pts.every(x => x.y < 0), warm: p.pts.find(x => x.y >= 0) }; };
+// Accuracy (#42): a station value is only shown as fact when present, fresh and unflagged; judged by its own measurement time
+const staleAfter = { wg: H, wg_boe: H, wr: H, lt: 2 * H, oft: 2 * H, rh: 2 * H, hs: 6 * H, n24: 6 * H, hsd24: 6 * H }, offlineAfter = 24 * H;
+const valueState = (s, f, now) => {
+  if (s[f] == null) return { missing: true };
+  const last = Date.parse(s.dates?.[f] || s.date), age = now - last;
+  if (!(age <= offlineAfter)) return { offline: true, last }; // no or unreadable time counts as offline
+  if (age > staleAfter[f]) return { stale: true, last };
+  return s.flags?.[f] ? { suspect: true, reason: s.flags[f] } : { ok: true };
+};
+const misplaced = s => s.flags?.station === "location mismatch"; // hidden from map and summary
+// the station with every value that is not ok set to null, and what was wrong in `bad`: {field: state}
+const goodOnly = (s, now) => { const g = { ...s, bad: {} }; for (const f in staleAfter) { const v = valueState(s, f, now); if (!v.ok && !v.missing) { g[f] = null; g.bad[f] = v; } } return g; };
+// banner rule: 07-20 h older than 75 min (hourly cadence + run time); at night, last refresh before 19:00 of the evening the night began
+const refreshStale = (lastIso, now) => {
+  const last = Date.parse(lastIso), k = viennaKey(now), h = +k.slice(11);
+  if (isNaN(last)) return true;
+  if (h >= 7 && h < 20) return now - last > 75 * 60e3;
+  return last < keyMs((h >= 20 ? k.slice(0, 10) : shift(k.slice(0, 10), -1)) + "T19");
+};
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-if (typeof module !== "undefined") module.exports = { STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze };
+if (typeof module !== "undefined") module.exports = { STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale };

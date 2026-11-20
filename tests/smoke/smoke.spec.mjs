@@ -29,6 +29,7 @@ for (const vp of VIEWPORTS) {
       await page.clock.setFixedTime(new Date(JSON.parse(fixture("stations")).updated)); // "now" = the fixture's run time, so the conditions window shows its data and model hours
       await page.goto("/index.html");
       await expect(page.locator("#updated")).toContainText("stations"); // data loaded
+      await expect(page.locator("#banner")).toBeHidden(); // health.json run is "now"
       await expect(page.locator("#map .leaflet-container, #map.leaflet-container")).toBeVisible();
       await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible(); // station dots
 

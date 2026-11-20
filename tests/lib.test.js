@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, latest, extreme, refroze } = require("../lib.js");
+const { band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -66,4 +66,38 @@ test("refroze: below 0 in every overnight hour with data, partial data counted",
   const w = refroze(hrs("oft", { "2026-11-19T20": -1, "2026-11-20T02": 0 }), "A", now);
   assert.equal(w.ok, false); assert.equal(w.warm.k, "2026-11-20T02");
   assert.equal(refroze(hrs("oft", { "2026-11-20T09": -4, "2026-11-19T17": -2 }), "A", now), null); // nothing inside 18-08
+});
+
+const T = iso => Date.parse(iso);
+test("valueState: ok, missing, stale per field, suspect, offline; dates[field] wins", () => {
+  const now = T("2026-11-20T16:35:00+01:00");
+  const s = { date: "2026-11-20T13:35:00+01:00", hs: 30, wg: 12, lt: -2, wr: null, flags: {}, dates: {} }; // 3 h old
+  assert.deepEqual(valueState(s, "hs", now), { ok: true }); // hs is stale only after 6 h
+  assert.deepEqual(valueState(s, "wg", now), { stale: true, last: T(s.date) }); // wind after 1 h
+  assert.deepEqual(valueState(s, "lt", now), { stale: true, last: T(s.date) }); // air temp after 2 h
+  assert.deepEqual(valueState(s, "wr", now), { missing: true });
+  assert.deepEqual(valueState({ ...s, dates: { wg: "2026-11-20T16:20:00+01:00" } }, "wg", now), { ok: true });
+  const fresh = { ...s, date: "2026-11-20T16:20:00+01:00", flags: { wg: "sensor frozen?" } };
+  assert.deepEqual(valueState(fresh, "wg", now), { suspect: true, reason: "sensor frozen?" });
+  assert.deepEqual(valueState({ ...s, date: "2026-11-19T15:40:00+01:00" }, "hs", now), { offline: true, last: T("2026-11-19T15:40:00+01:00") });
+  assert.equal(valueState({ ...s, date: undefined }, "hs", now).offline, true);
+});
+test("goodOnly nulls every value that is not ok; misplaced", () => {
+  const now = T("2026-11-20T16:35:00+01:00");
+  const g = goodOnly({ date: "2026-11-20T16:20:00+01:00", hs: 30, wg: 0, wg_boe: 0, wr: 90, flags: { wg: "sensor frozen?", wr: "sensor frozen?" } }, now);
+  assert.equal(g.hs, 30); assert.equal(g.wg, null); assert.equal(g.wr, null); assert.equal(g.wg_boe, 0);
+  assert.deepEqual(Object.keys(g.bad), ["wg", "wr"]);
+  assert.equal(misplaced({ flags: { station: "location mismatch" } }), true);
+  assert.equal(misplaced({ flags: {} }), false);
+});
+test("refreshStale: day window 75 min, night window from 19:00 of that evening", () => {
+  const at = k => keyMs(k);
+  assert.equal(refreshStale("2026-11-20T15:21:00+01:00", at("2026-11-20T16") + 35 * 60e3), false); // 74 min
+  assert.equal(refreshStale("2026-11-20T15:19:00+01:00", at("2026-11-20T16") + 35 * 60e3), true); // 76 min
+  assert.equal(refreshStale("2026-11-20T19:40:00+01:00", at("2026-11-21T06")), false); // night: last run 19:40 is enough
+  assert.equal(refreshStale("2026-11-20T18:50:00+01:00", at("2026-11-20T23")), true); // before 19:00 that evening
+  assert.equal(refreshStale("2026-11-20T19:05:00+01:00", at("2026-11-20T22")), false);
+  assert.equal(refreshStale("2026-11-19T19:30:00+01:00", at("2026-11-21T02")), true); // the night before's run
+  assert.equal(refreshStale("2026-11-20T19:30:00+01:00", at("2026-11-21T07")), true); // 07:00: day rule again
+  assert.equal(refreshStale(undefined, at("2026-11-21T07")), true);
 });
