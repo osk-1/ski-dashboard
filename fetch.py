@@ -19,6 +19,7 @@ import json
 import math
 import os
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -69,8 +70,8 @@ BULLETINS = {
     "LWD Vorarlberg": "https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json",
 }
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
-# Plausibility checks (flag only, never change a value); thresholds to tune
-LIMITS = {"hs": (0, 800), "lt": (-45, 35), "oft": (-45, 35), "wg": (0, 250), "wg_boe": (0, 250), "wr": (0, 360), "rh": (0, 100)}  # -> "out of range"
+# Plausibility checks (flag only, never change a value); thresholds to tune. rh up to 103: saturated sensors read 100–103
+LIMITS = {"hs": (0, 800), "lt": (-45, 35), "oft": (-45, 35), "wg": (0, 250), "wg_boe": (0, 250), "wr": (0, 360), "rh": (0, 103)}  # -> "out of range"
 JUMP = {"hs": (-15, 30), "lt": (-8, 8)}  # allowed change latest hour vs hour before -> "jump"
 STUCK_HOURS, STUCK_WIND = 6, 5  # identical lt (wr: while wg > 5 km/h) for 6 consecutive hours -> "stuck"
 FROZEN_HOURS = 3  # wg == 0 for 3 latest hours while lt < 0 and rh > 95 -> "sensor frozen?"
@@ -466,6 +467,11 @@ def daily_snow_from_metno(timeseries, days):
 LEVEL = {"low": 1, "moderate": 2, "considerable": 3, "high": 4, "very_high": 5}
 
 
+def preseason(name, e):
+    """LWD Vorarlberg 404s until its first bulletin of the season: the documented normal state, not a failure."""
+    return name == "LWD Vorarlberg" and isinstance(e, urllib.error.HTTPError) and e.code == 404
+
+
 def parse_danger(bulletin, ids):
     out = {}
     for b in bulletin["bulletins"]:
@@ -688,6 +694,9 @@ def main(days):
             regions.update(parse_danger(get_json(url), ids))
         except Exception as e:
             print("avalanche bulletin failed:", name, e, file=sys.stderr)
+            if preseason(name, e):
+                src["bulletins"]["detail"] = "no bulletin published yet"
+                continue
             fail("bulletins", "; ".join(filter(None, [src["bulletins"]["error"], f"{name}: {e}"])))
     if regions:
         with open("data/danger.json", "w") as fh:
@@ -952,7 +961,7 @@ def selftest():
         "wg": "out of range",
         "wg_boe": "out of range",
     }
-    hl = {"2026-11-20T12": {"hs": {"A": 900.0, "B": 50.0}, "rh": {"A": 101.0}}, "2026-11-20T11": {"lt": {"A": 1.0}, "flags": {"A": {"lt": "x"}}}}
+    hl = {"2026-11-20T12": {"hs": {"A": 900.0, "B": 50.0}, "rh": {"A": 103.1, "B": 103.0}}, "2026-11-20T11": {"lt": {"A": 1.0}, "flags": {"A": {"lt": "x"}}}}
     hour_flags(hl)  # limits per hour; stale flags of an earlier run dropped
     assert (hl["2026-11-20T12"]["flags"], "flags" in hl["2026-11-20T11"]) == ({"A": {"hs": "out of range", "rh": "out of range"}}, False)
     sn = {**ok, "id": "SKAP2", "name": "Kapall Schneestation", "lat": 47.14749, "lon": 10.25878, "hs": 50.0, "wg": None, "wg_boe": None, "wr": None}
@@ -997,6 +1006,8 @@ def selftest():
             assert (carry(tmp, "tawes"), carry(tmp, "vorarlberg"), carry(tmp + ".missing", "tawes")) == ([old[1]], [old[2]], [])
     finally:
         os.remove(tmp)
+    nf = lambda code: urllib.error.HTTPError("u", code, "x", None, None)
+    assert (preseason("LWD Vorarlberg", nf(404)), preseason("LWD Vorarlberg", nf(500)), preseason("Euregio avalanche.report", nf(404))) == (True, False, False)
     print("selftest ok")
 
 
