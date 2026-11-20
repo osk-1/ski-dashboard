@@ -41,7 +41,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 .stat b { display: block; font: 600 1.7rem/1 var(--display); font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
 #map { height: 460px; border-radius: 8px; background: var(--land); position: relative; z-index: 0; isolation: isolate; overflow: hidden; }
-@media (max-width: 820px) { #map { height: 360px; } }
+@media (max-width: 820px) { #map { height: 360px; } .strip { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; } .stat b { font-size: 1.3rem; } #danger.old, #dangerChip:not(.old) { display: none; } }
 @media (max-width: 820px) and (orientation: landscape), (max-height: 500px) and (orientation: landscape) { #map { height: 80vh; } }
 #map.leaflet-container { font-family: var(--body); font-size: .8rem; }
 #map .leaflet-tile-pane { opacity: var(--relief-op); mix-blend-mode: var(--relief-blend); filter: var(--relief-filter); }
@@ -122,7 +122,7 @@ tbody tr[aria-selected="true"] { background: var(--accent-soft); box-shadow: ins
 tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .up { color: var(--accent); font-weight: 600; }
 .chartbox { position: relative; height: 260px; }
-.fcdays { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 10px; text-align: center; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 820px) { .chartbox { height: max(200px, 62vw); } }
 .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 .src { color: var(--muted); font-size: .78rem; }
 a { color: var(--accent); }
@@ -178,7 +178,6 @@ a { color: var(--accent); }
     <section class="panel">
       <h2 id="fcTitle">5-day snowfall forecast</h2>
       <div class="chartbox"><canvas id="fc" aria-label="Snowfall forecast chart"></canvas></div>
-      <div class="fcdays" id="fcTemps"></div>
       <p class="src" id="fcSource"></p>
     </section>
   </div>
@@ -472,16 +471,18 @@ function renderCharts() {
   document.getElementById("fcTitle").textContent = `5-day snowfall · ${s.name}`;
   charts.fc?.destroy();
   if (!fp) { document.getElementById("fcSource").textContent = "No forecast stored yet."; return; }
+  const t0 = v => v == null ? "–" : Math.round(v);
   charts.fc = new Chart(document.getElementById("fc"), {
     type: "bar",
-    data: { labels: days.map(dayLabel), datasets: [{ label: "New snow (cm)", data: fp.snowfall, backgroundColor: accent, borderRadius: 4, maxBarThickness: 44 }] },
+    data: { labels: days.map((d, i) => [dayLabel(d), `${t0(fp.tmin[i])}° / ${t0(fp.tmax[i])}°`]), datasets: [{ label: "New snow (cm)", data: fp.snowfall, backgroundColor: accent, borderRadius: 4, maxBarThickness: 44 }] },
     options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y ?? 0} cm new snow` } } },
       scales: { x: { grid: { display: false } }, y: { beginAtZero: true, title: { display: true, text: "cm" } } } },
   });
-  document.getElementById("fcTemps").innerHTML = days.map((d, i) =>
-    `<div>${fp.tmin[i] == null ? "–" : Math.round(fp.tmin[i])}° / ${fp.tmax[i] == null ? "–" : Math.round(fp.tmax[i])}°</div>`).join("");
-  document.getElementById("fcSource").textContent = `Min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
+  document.getElementById("fcSource").textContent = `Under each day: min / max °C at station altitude. Source: ${state.forecast.source}, issued ${fmtSlot(state.forecast.generated)}.`;
 }
+
+// touch: drop the tooltip when the finger lifts; click comes last, after the emulated mousemove that would re-show it (listener on the canvas, which survives chart re-creation)
+for (const ev of ["pointerup", "touchend", "click"]) document.getElementById("hist").addEventListener(ev, e => { const c = charts.hist; if (e.pointerType === "mouse" || !c) return; setTimeout(() => { c.setActiveElements([]); c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update(); }, 50); }); // after Chart.js's own (rAF-throttled) event handling
 
 function renderAll() { renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); }
 
