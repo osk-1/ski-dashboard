@@ -394,7 +394,7 @@ def check(st, hours, now):
             for f in ("wg", "wg_boe", "wr"):
                 fl.setdefault(f, "sensor frozen?")
     ref = REFERENCE.get(id)
-    if not ref or ref[0] != st.get("name") or st.get("lat") is None or dist_m(ref[1:], (st["lat"], st["lon"])) > LOCATION_M:
+    if not ref or ref[0] != st.get("name") or st.get("lat") is None or st.get("lon") is None or dist_m(ref[1:], (st["lat"], st["lon"])) > LOCATION_M:
         fl["station"] = "location mismatch"
     return fl
 
@@ -558,6 +558,9 @@ def main(days):
     def fail(k, e):
         src[k].update(ok=False, error=str(e))
 
+    def note(k, msg):  # partial trouble: the source still delivered
+        src[k]["detail"] = "; ".join(filter(None, [src[k]["detail"], msg]))
+
     live = get_json(LWD + "stations.geojson")["features"]  # primary source: a failure aborts the run
     stations = [station(f) for f in live if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
     if gone := sorted(set(STATIONS) - {x["id"] for x in stations}):
@@ -597,17 +600,22 @@ def main(days):
             print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
         hourly = {"model": {"source": None, "issued": None}, "hours": {}}
         hours = hourly["hours"]
+    bad = 0
     for t in missing_hours(hours, STATIONS, now):  # Tirol archive: only hours not yet recorded
         try:
             for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
                 hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
         except Exception as e:
             print("skip hour", t.isoformat(), e, file=sys.stderr)
+            bad += 1
+    if bad:
+        note("tirol", f"archive hours failed: {bad}")
     try:
         for k, maps in tirol_hours(live, by_uuid).items():
             hmerge(hours, k, maps, keep=True)
     except Exception as e:
         print("live hour failed:", e, file=sys.stderr)
+        note("tirol", f"live hour failed: {e}")
     sl = slots(days, now)
     iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
     for s in sl:
@@ -615,6 +623,7 @@ def main(days):
             feats = get_json(snapshot_url(s))["features"]
         except Exception as e:
             print("skip", s.isoformat(), e, file=sys.stderr)
+            note("tirol", f"slot snapshot failed: {s.isoformat()}")
             continue
         maps = {k: {} for k in FIELDS}
         for f in feats:
@@ -653,7 +662,7 @@ def main(days):
                         merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items() if f in FIELDS})
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
-                src["vorarlberg"]["detail"] = "; ".join(filter(None, [src["vorarlberg"]["detail"], f"history failed: {st['id']} {e}"]))
+                note("vorarlberg", f"history failed: {st['id']} {e}")
     readings = prune(readings, now)
     with open("data/readings.json", "w") as fh:
         json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
@@ -976,6 +985,7 @@ def selftest():
     assert check(sn, {"2026-11-20T12": {"hs": {"SKAP2": 50}}, "2026-11-20T10": {"hs": {"SKAP2": 0}}}, now) == {}  # gap: no previous hour, no jump
     assert check(ok, hk(6, "lt", [-4.0] * 6), now) == {"lt": "stuck"}
     assert check(ok, hk(6, "lt", [-4.0] * 5 + [-4.1]), now) == {}  # 5 identical hours are not stuck
+    assert check(ok, hk(6, "lt", [-4.0] * 5 + [None]), now) == {}  # a missing hour breaks the run
     assert check(ok, hh(hk(6, "wr", [200.0] * 6), hk(6, "wg", [6.0] * 6)), now) == {"wr": "stuck"}
     assert check(ok, hh(hk(6, "wr", [200.0] * 6), hk(6, "wg", [6.0] * 5 + [5.0])), now) == {}  # calm hour: a vane may rest
     assert check({**ok, "wg_boe": 19.9}, {}, now) == {"wg_boe": "gust below mean"}
@@ -985,9 +995,11 @@ def selftest():
         frozen,
         {},
     )
+    assert check(ok, {**fz, "2026-11-20T11": {**fz["2026-11-20T11"], "wg": {}}}, now) == {}  # gap in wg: not frozen
     assert check({**ok, "date": "2026-11-20T12:41:00+01:00"}, {}, now) == {f: "time in future" for f in ("lt", "wg", "wg_boe", "wr")}
     assert check({**ok, "date": "2026-11-20T12:40:00+01:00"}, {}, now) == {}
     mv = lambda **kw: check({**ok, **kw}, {}, now).get("station")
+    assert mv(lon=None) == "location mismatch"  # no crash without lon
     assert (mv(lat=47.15808), mv(lat=47.15308), mv(name="X"), mv(id="NEW1")) == (
         "location mismatch",
         None,
