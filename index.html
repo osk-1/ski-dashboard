@@ -86,6 +86,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .pl.d { flex-direction: column; align-items: flex-start; gap: 2px; top: -5px; }
 #map .pl.u { flex-direction: column-reverse; align-items: flex-start; gap: 2px; top: auto; bottom: -5px; }
 #map .pl.pk { color: var(--muted); font-weight: 400; }
+#map:not(.zin) .pl.pk { display: none; } /* peaks are dense: only once zoomed in */
 #map .pl.pk i { width: 12px; height: 11px; background: var(--muted); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
 .legend svg { vertical-align: middle; }
@@ -192,7 +193,10 @@ a { color: var(--accent); }
 const BOUNDS = { lon0: 10.09, lon1: 10.43, lat0: 47.003, lat1: 47.240 }; // west: east edge of the Sonnenkopf ski area; north: 2 km south of Warth
 const PLACES = [["St. Anton", 10.2636, 47.1295], ["St. Christoph", 10.2135, 47.1277], ["Pettneu", 10.3428, 47.1453],
   ["Ischgl", 10.2921, 47.0125]];
-const PEAKS = [["Valluga 2811", 10.2125, 47.1575]];
+const PEAKS = [["Valluga 2811", 10.2125, 47.1575], ["Scheibler 2978", 10.2220, 47.0587], ["Augstenbergkopf 2881", 10.2402, 47.0775],
+  ["Maroikopf 2529", 10.1632, 47.1136],["Kaltenberg 2896", 10.1383, 47.0865], ["Trittkopf 2720", 10.1935, 47.1553], ["Rüfispitze 2636", 10.1846, 47.1919],
+  ["Madlochspitze 2545", 10.1226, 47.1792], ["Erzbergspitze 2536", 10.1421, 47.1531], ["Wildebene 2570", 10.1803, 47.0958], ["Saumspitze 3039", 10.2696, 47.0509], ["Kreuzjochspitze 2919", 10.3061, 47.0793],
+  ["Hochkarspitze 2836", 10.3076, 47.1108], ["Erlijoch 2431", 10.2179, 47.1756], ["Roßfallscharte 2732", 10.2887, 47.0945]];
 const STEPS = [10, 25, 50, 100]; // cm bands for the sequential scale
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const band = hs => hs == null ? -1 : STEPS.filter(s => hs >= s).length;
@@ -269,7 +273,7 @@ try { const j = JSON.parse(localStorage.getItem("layers")); if (j) { if (typeof 
 const vis = s => lay.on[catOf(s)] && !lay.hide.includes(s.id); // dot, label, table row, summary
 const arrowVis = s => arrowOn(s) && s.type !== "wind" && lay.on.wind && !lay.hide.includes(s.id); // small wind arrow above a snow/weather dot
 const shown = () => state.stations.filter(vis);
-for (const k of [...CATS.map(c => c[0]), "danger"]) lay.on[k] ??= !phone() || k === "snow"; // defaults: phone shows snow only; a saved choice wins
+for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phone() || k === "snow"; // defaults: phone shows snow only; a saved choice wins
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
@@ -296,7 +300,7 @@ function initMap() {
     const stn = c => state.stations.filter(s => catOf(s) === c).sort((a, b) => b.alt - a.alt);
     const row = (attr, id, text, extra = "") => `<label><input type="checkbox" ${attr}="${esc(id)}"> <span>${esc(text)}${extra}</span></label>`;
     const stale = Object.values(state.danger?.regions || {}).some(r => new Date(r.valid_end) < new Date());
-    p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : []].join("") +
+    p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : [], row("data-cat", "peaks", "Peaks")].join("") +
       CATS.filter(([k]) => stn(k).length).map(([k, n]) => `<div role="group" aria-label="${n} stations"><div class="gh"><b>${n} stations</b><button type="button" data-set="${k}:1" aria-label="All ${n.toLowerCase()} stations">All</button><button type="button" data-set="${k}:0" aria-label="No ${n.toLowerCase()} stations">None</button></div>${stn(k).map(s => row("data-stn", s.id, s.name, ` <small>${s.alt} m</small>`)).join("")}</div>`).join("");
     const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : !lay.hide.includes(i.dataset.stn); };
     const size = () => { p.style.maxHeight = map.getSize().y - 80 + "px"; };
@@ -315,7 +319,7 @@ function initMap() {
   map.createPane("hit").style.zIndex = 390; // tap pads: under every dot, so a pad never covers a neighbouring dot
   for (const [list, cls] of [[PLACES, "v"], [PEAKS, "pk"]]) for (const [name, lon, lat] of list) {
     const marker = L.marker([lat, lon], { pane: "places", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: [0, 0], html: `<span class="pl ${cls}"><i></i>${esc(name)}</span>` }) }).addTo(map);
-    landmarks.push({ name, lat, lon, marker });
+    landmarks.push({ name, lat, lon, marker, pk: cls === "pk" });
   }
   map.createPane("danger").style.zIndex = 330; // above the relief tiles, under places and stations
   groups = Object.fromEntries(CATS.map(([k]) => [k, L.layerGroup()]));
@@ -324,7 +328,7 @@ function initMap() {
     const r = state.danger.regions[f.properties.id], c = DGC[Math.max(0, ...(r?.ratings.map(x => x.level) || []))], old = !r || new Date(r.valid_end) < new Date();
     return { color: c, weight: 1, opacity: old ? .35 : .8, fillColor: c, fillOpacity: old ? .12 : .4 }; } });
   new Layers({ position: "topright" }).addTo(map);
-  const names = () => mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5);
+  const names = () => { mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5); mapDiv.classList.toggle("zin", map.getZoom() >= fitZ + 1); };
   map.on("zoomend", names); names();
 }
 
@@ -355,9 +359,11 @@ function renderMap() {
   for (const s of state.stations) { const { x, y } = at(s.lat, s.lon); if (vis(s)) stationBoxes.push([x - 14, y - 14, x + 14, y + 14]); if (arrowVis(s)) stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
   const taken = [...stationBoxes];
   for (const lm of landmarks) {
+    if (lm.pk) { map[lay.on.peaks ? "addLayer" : "removeLayer"](lm.marker); if (!lay.on.peaks) continue; }
     const { x, y } = at(lm.lat, lm.lon), len = lm.name.length * 7;
     const sides = [["", [x - 6, y - 9, x + 14 + len, y + 9]], ["l", [x - 14 - len, y - 9, x + 6, y + 9]], ["d", [x - 6, y - 5, x + 6 + len, y + 22]], ["u", [x - 6, y - 22, x + 6 + len, y + 5]]];
-    const [side, box] = sides.reduce((best, c) => costAgainst(stationBoxes, c[1]) < costAgainst(stationBoxes, best[1]) ? c : best);
+    // peaks always label to the right of the symbol
+    const [side, box] = (lm.pk ? sides.slice(0, 1) : sides).reduce((best, c) => costAgainst(taken, c[1]) < costAgainst(taken, best[1]) ? c : best);
     lm.marker.getElement().firstChild.className = lm.marker.getElement().firstChild.className.replace(/ (l|d|u)$/, "") + (side && " " + side);
     taken.push(box);
   }
