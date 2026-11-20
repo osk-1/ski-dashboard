@@ -42,6 +42,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 .stat span { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
 #map { height: 460px; border-radius: 8px; background: var(--land); position: relative; z-index: 0; isolation: isolate; overflow: hidden; }
 @media (max-width: 820px) { #map { height: 360px; } }
+@media (max-width: 820px) and (orientation: landscape), (max-height: 500px) and (orientation: landscape) { #map { height: 80vh; } }
 #map.leaflet-container { font-family: var(--body); font-size: .8rem; }
 #map .leaflet-tile-pane { opacity: var(--relief-op); mix-blend-mode: var(--relief-blend); filter: var(--relief-filter); }
 #map .leaflet-bar { border: 1px solid var(--line); box-shadow: none; }
@@ -71,6 +72,16 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .pl.pk i { width: 12px; height: 11px; background: var(--muted); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
 .legend svg { vertical-align: middle; }
+.ls { display: contents; }
+.legend button, .legend .ph { display: none; }
+/* phone: swatches on one scrolling row, wind explanation behind a "?" button */
+@media (max-width: 820px), (max-height: 500px) and (orientation: landscape) {
+  .ls { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow-x: auto; flex: 1 1 0; min-width: 0; }
+  .legend .cm, .legend .sep, .legend .wx { display: none; }
+  .legend .ph { display: inline; }
+  .legend.open .wx { display: block; flex-basis: 100%; }
+  .legend button { display: inline-block; flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--muted); font: 600 .8rem/1 var(--body); cursor: pointer; }
+}
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .tablebox { overflow-x: auto; }
 summary { list-style: none; display: flex; align-items: center; cursor: pointer; }
@@ -231,10 +242,12 @@ function renderDanger() {
 let map, stnLayer, fitBounds, fitZ, fitCenter;
 const landmarks = [];
 const mapDiv = document.getElementById("map");
+document.getElementById("legend").addEventListener("click", e => { const b = e.target.closest("button"); if (b) b.setAttribute("aria-expanded", e.currentTarget.classList.toggle("open")); });
+const phone = () => matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)").matches;
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
-  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16 });
+  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
   const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
   fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
@@ -242,7 +255,7 @@ function initMap() {
   const fit = () => { reset(); fitZ = map.getZoom(); fitCenter = map.project(map.getCenter(), fitZ); map.setMinZoom(fitZ - 1); };
   fit();
   let timer;
-  map.on("resize", () => { clearTimeout(timer); timer = setTimeout(() => { fit(); renderMap(); }, 150); });
+  map.on("resize", () => { names(); clearTimeout(timer); timer = setTimeout(() => { fit(); renderMap(); }, 150); });
   const Reset = L.Control.extend({ onAdd() {
     const d = L.DomUtil.create("div", "leaflet-bar"), b = L.DomUtil.create("button", "", d);
     b.type = "button"; b.title = "Reset view"; b.setAttribute("aria-label", "Reset view");
@@ -250,20 +263,23 @@ function initMap() {
     b.onclick = reset; L.DomEvent.disableClickPropagation(d); return d; } });
   new Reset({ position: "topleft" }).addTo(map);
   map.createPane("places").style.zIndex = 350; // under the station dots
+  map.createPane("hit").style.zIndex = 390; // tap pads: under every dot, so a pad never covers a neighbouring dot
   for (const [list, cls] of [[PLACES, "v"], [PEAKS, "pk"]]) for (const [name, lon, lat] of list) {
     const marker = L.marker([lat, lon], { pane: "places", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: [0, 0], html: `<span class="pl ${cls}"><i></i>${esc(name)}</span>` }) }).addTo(map);
     landmarks.push({ name, lat, lon, marker });
   }
   stnLayer = L.layerGroup().addTo(map);
-  const names = () => mapDiv.classList.toggle("names", map.getZoom() >= fitZ + 1.5);
+  const names = () => mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5);
   map.on("zoomend", names); names();
 }
 
 function renderMap() {
   const snow = i => i < 0 ? css("--line") : css(`--snow-${i}`);
-  document.getElementById("legend").innerHTML = "Snow height: " +
-    ["<10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i>${l} cm`).join(" ") +
-    ` · <svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station`;
+  const lg = document.getElementById("legend");
+  lg.innerHTML = `<span class="ls"><span>Snow<span class="cm"> height</span>:</span>` +
+    ["&lt;10", "10–25", "25–50", "50–100", "100+"].map((l, i) => `<i style="background:${snow(i)}"></i><span>${l}<span class="cm"> cm</span></span>`).join("") +
+    `<span class="ph">cm</span></span><button type="button" aria-label="Wind legend" aria-expanded="${lg.classList.contains("open")}">?</button>` +
+    `<span class="sep">·</span><span class="wx"><svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · hollow = wind-only station</span>`;
   if (typeof L === "undefined") { mapDiv.innerHTML = '<div class="empty">Map unavailable.</div>'; return; }
   if (!state.stations.length) return;
   if (!map) initMap();
@@ -306,6 +322,7 @@ function renderMap() {
     const spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW); // the selected station always keeps its name, even if it must overlap
     taken.push(spot.box);
     const dir = spot.dir, offset = spot.off;
+    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", e => select(state.stations.reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(stnLayer); // overlapping pads: pick the station nearest the tap // 44px touch target
     const m = L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : wo ? css("--wind") : css("--panel"), fillColor: wo ? css("--panel") : snow(band(s.hs)), fillOpacity: 1 }).addTo(stnLayer);
     m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b>${val}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
     m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
