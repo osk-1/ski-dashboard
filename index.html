@@ -86,7 +86,7 @@ td.n, th.n { text-align: right; white-space: nowrap; }
 tbody tr { cursor: pointer; }
 @media (hover: hover) { tbody tr:hover { background: var(--accent-soft); } }
 td small { display: none; color: var(--muted); font-size: .75rem; }
-@media (max-width: 820px) { .altc, .u { display: none; } td small { display: block; } td.nm { white-space: nowrap; max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; } td, th { padding-left: 6px; padding-right: 6px; } }
+@media (max-width: 820px) { .altc, .u { display: none; } td small { display: block; } td.nm { font-size: .9rem; white-space: nowrap; max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; } td, th { padding-left: 6px; padding-right: 6px; } }
 .chartsec .bar { position: sticky; top: 0; z-index: 500; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .bar label { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; }
 .bar select { flex: 1; min-width: 0; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -140,7 +140,7 @@ a { color: var(--accent); }
   </div>
 
   <div class="chartsec">
-  <div class="bar"><label for="stnSel">Station</label><select id="stnSel"></select></div>
+  <div class="bar" hidden><label for="stnSel">Station</label><select id="stnSel"></select></div>
   <div class="grid2">
     <section class="panel">
       <h2 id="histTitle">History</h2>
@@ -327,13 +327,14 @@ function renderTable() {
   document.getElementById("rows").innerHTML = rows.map(s => {
     const d = delta24(s.id);
     return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
-      <td class="nm">${esc(s.name)}<small>${s.alt} m</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + '<span class="u"> cm</span>'}</b></td>
+      <td class="nm" title="${esc(s.name)}">${esc(s.name)}<small>${s.alt} m</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : Math.round(s.hs) + '<span class="u"> cm</span>'}</b></td>
       <td class="n ${d > 0 ? "up" : ""}">${d == null ? "–" : (d > 0 ? "+" : "") + d}</td>
       <td class="n">${hasWind(s) ? `${arrowOn(s) ? `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span> ` : ""}${Math.round(s.wg)}${s.wg_boe != null ? " / " + Math.round(s.wg_boe) : ""}` : "–"}</td></tr>`;
   }).join("");
   const sel = document.getElementById("stnSel");
-  sel.innerHTML = rows.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  if (sel.options.length !== rows.length) sel.innerHTML = rows.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
   sel.value = state.selected;
+  sel.parentNode.hidden = false;
 }
 
 function chartDefaults() {
