@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Arlberg Snow Depth</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f4f7fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e151d" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous">
 <style>
@@ -588,8 +592,11 @@ tableDetails.addEventListener("toggle", () => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
 new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
-(async () => {
-  const note = document.getElementById("updated");
+const note = document.getElementById("updated");
+let lastLoad = 0, loading = false;
+async function load() {
+  if (loading) return;
+  loading = true;
   const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
   try {
     const [st, fc, rd, dg, rg] = await Promise.all([get("stations"), get("forecast").catch(() => null), get("readings").catch(() => ({})), get("danger").catch(() => null), get("regions").catch(() => null)]);
@@ -599,11 +606,18 @@ new MutationObserver(renderAll).observe(document.documentElement, { attributes: 
     state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
     if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;
+    lastLoad = Date.now();
+    if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); } // restyle polygons for the new bulletin
     renderAll();
   } catch {
-    note.textContent = "Couldn't load station data. Reload the page to try again.";
-  }
-})();
+    if (!lastLoad) note.textContent = "Couldn't load station data. Reload the page to try again."; // refresh failures keep old data
+  } finally { loading = false; }
+}
+load();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - lastLoad > 30 * 60e3) load();
+});
+
 </script>
 </body>
 </html>
