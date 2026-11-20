@@ -13,7 +13,7 @@ function data() {
   st("VOR-ZURS1").date = "2026-11-20T13:35:00+01:00"; // 3 h before the run: wind stale, HS still fresh
   st("KSIN2").date = "2026-11-20T09:35:00+01:00"; // 7 h: HS and its 24 h change stale
   Object.assign(st("SAGA1"), { wg: 0, wg_boe: 0, flags: { wg: "sensor frozen?", wg_boe: "sensor frozen?", wr: "sensor frozen?" } }); // rimed anemometer
-  Object.assign(st("SKAP2"), { lat: st("SKAP2").lat + 0.009, flags: { station: "location mismatch" } }); // moved 1 km
+  Object.assign(st("SKAP2"), { hs: 99, lat: st("SKAP2").lat + 0.009, flags: { station: "location mismatch" } }); // moved 1 km
   d.health.run = "2026-11-20T14:00+01:00"; // last successful refresh 2 h 35 min before "now"
   (d.hourly.hours["2026-11-20T14"].flags ??= {})["VOR-ZURS1"] = { lt: "jump" };
   return d;
@@ -25,7 +25,7 @@ async function open(browser, vp, scheme, d) {
   const problems = [];
   page.on("pageerror", (e) => problems.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") problems.push(m.text()); });
-  await page.addInitScript(() => { localStorage.setItem("layers", JSON.stringify({ on: { snow: true, wind: true } })); localStorage.setItem("tableOpen", "1"); });
+  await page.addInitScript(() => { localStorage.setItem("layers", JSON.stringify({ on: { snow: true, wind: true } })); localStorage.setItem("tableOpen", "1"); localStorage.setItem("sel", "SKAP2"); });
   await page.route("**/data/*.json", (route) => {
     const n = new URL(route.request().url()).pathname.match(/(\w+)\.json$/)[1];
     return d[n] ? route.fulfill({ contentType: "application/json", body: JSON.stringify(d[n]) }) : route.fulfill({ status: 404, body: "" });
@@ -80,6 +80,9 @@ for (const vp of VIEWPORTS) {
       // moved station: hidden from map and table, listed in Data checks
       await expect(page.locator('#map [data-sid="SKAP2"]')).toHaveCount(0);
       await expect(page.locator('#rows tr[data-id="SKAP2"]')).toHaveCount(0);
+      await expect(page.locator('#stnSel option[value="SKAP2"]')).toHaveCount(0); // saved in sel and deepest raw HS, still never selected
+      await expect(page.locator("#stnSel")).toHaveValue("KDIA2"); // deepest good HS (Ulmerhütte is offline, KSIN2 stale)
+      await expect(page.locator("#condTitle")).toContainText("Dias");
       await page.click("#checks summary");
       const checks = page.locator("#checkList");
       await expect(checks).toContainText("Kapall Schneestation hidden from map, summary and table: location mismatch");

@@ -28,12 +28,13 @@ const FN = { hs: "snow height", n24: "new snow 24 h", hsd24: "24 h change", lt: 
 const fmtLast = t => viennaKey(t).slice(0, 10) === viennaKey(Date.now()).slice(0, 10) ? fmtHour(t) : fmtSlot(t);
 const badText = v => v.suspect ? `suspect: ${v.reason}` : `no recent data (last ${fmtLast(v.last)})`;
 const isBad = v => !v.ok && !v.missing;
-const badList = bad => Object.entries(Object.groupBy(Object.entries(bad), ([, v]) => badText(v))).map(([t, fs]) => `${fs.map(([f]) => FN[f]).join(", ")}: ${t}`).join("; ");
+const group = (xs, key) => xs.reduce((o, x) => ((o[key(x)] ??= []).push(x), o), Object.create(null)); // Object.groupBy needs Safari 17.4
+const badList = bad => Object.entries(group(Object.entries(bad), ([, v]) => badText(v))).map(([t, fs]) => `${fs.map(([f]) => FN[f]).join(", ")}: ${t}`).join("; ");
 
 function renderSummary() {
   const sh = shown(), s = sh.filter(x => x.hs != null), ex = sh.filter(x => x.bad.hs).length;
   const left = sh.filter(x => Object.keys(x.bad).length).map(x => `${esc(x.name)} (${esc(badList(x.bad))})`);
-  const note = left.length ? `<p class="src xl">Excluded as not current or suspect: ${left.join(" · ")}.</p>` : "";
+  const note = left.length ? `<p class="src xl">Not current or suspect: ${left.join(" · ")}.</p>` : "";
   if (!s.length) { document.getElementById("summary").innerHTML = '<div class="stat"><b>–</b><span>No snow stations shown</span></div>' + note; return; }
   const deep = s.reduce((a, b) => b.hs > a.hs ? b : a);
   const avg = s.reduce((a, b) => a + b.hs, 0) / s.length;
@@ -297,7 +298,7 @@ function renderTable() {
       <td class="n">${hasWind(s) ? `${arrowOn(s) ? strike(wr, `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span>`) + " " : ""}${strike(wg, Math.round(s.wg))}${s.wg_boe != null ? " / " + strike(gu, Math.round(s.wg_boe)) : ""}${why([wg, gu, wr])}` : "–"}</td></tr>`;
   }).join("");
   const sel = document.getElementById("stnSel");
-  const opts = state.stations.filter(s => vis(s) || s.id === state.selected).sort(byAlt).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join(""); // the selected station stays listed even when hidden
+  const opts = placed().filter(s => vis(s) || s.id === state.selected).sort(byAlt).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join(""); // the selected station stays listed even when hidden
   if (sel.dataset.o !== opts) sel.innerHTML = sel.dataset.o = opts;
   sel.value = state.selected;
   sel.parentNode.hidden = false;
@@ -390,8 +391,8 @@ function renderCond(s) {
   el("condBox").hidden = condH === 1; el("condNow").hidden = condH !== 1; el("condRh").parentNode.hidden = condH === 1;
   if (condH === 1) {
     el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now);
-      const fl = v && hours[v.k].flags?.[id]?.[f], t = v ? `${esc(v.y)} ${u}` : "–";
-      return `<div class="stat"><b>${fl ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}${fl ? ` · suspect: ${esc(fl)}` : ""}</small></div>`; }).join("");
+      const fl = v && hours[v.k].flags?.[id]?.[f], old = v && Date.now() - keyMs(v.k) > staleAfter[f], t = v ? `${esc(v.y)} ${u}` : "–"; // pr/hr have no staleAfter: never stale
+      return `<div class="stat"><b>${fl || old ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}${fl ? ` · suspect: ${esc(fl)}` : old ? " · not current" : ""}</small></div>`; }).join("");
     el("condNote").textContent = `Latest measured values (${srcOf(id)}), with their measurement times.`;
     return;
   }
@@ -466,8 +467,9 @@ function renderChecks() {
   for (const s of state.stations) {
     if (misplaced(s)) { items.push(`<b>${esc(s.name)}</b> hidden from map, summary and table: location mismatch (reported position or name doesn't match the known station).`); continue; }
     const parts = Object.entries(s.flags || {}).map(([f, r]) => [f, `suspect: ${r} (${WHY[r] || "plausibility check"})`]);
-    if (!off.has(s.id)) for (const f in staleAfter) { const v = valueState(s, f, now); if (v.stale) parts.push([f, `not current: last ${fmtLast(v.last)}, older than ${staleAfter[f] / 3600e3} h`]); }
-    const txt = Object.entries(Object.groupBy(parts, ([, t]) => t)).map(([t, fs]) => `${fs.map(([f]) => FN[f] || f).join(", ")} ${t}`);
+    // live staleness; n24/hsd24 are derived and not shown, the HS line covers them
+    if (!off.has(s.id)) for (const f in staleAfter) { const v = valueState(s, f, now); if (v.stale && f !== "n24" && f !== "hsd24") parts.push([f, `not current: last ${fmtLast(v.last)}, older than ${staleAfter[f] / 3600e3} h`]); }
+    const txt = Object.entries(group(parts, ([, t]) => t)).map(([t, fs]) => `${fs.map(([f]) => FN[f] || f).join(", ")} ${t}`);
     if (txt.length) items.push(`<b>${esc(s.name)}</b>: ${esc(txt.join("; "))}.`);
   }
   document.getElementById("checksN").textContent = items.length ? `${items.length} note${items.length > 1 ? "s" : ""}` : "all clear";
@@ -515,7 +517,7 @@ async function load() {
     state.stations = st.stations || [];
     state.forecast = fc; state.hourly = hr; state.health = he; state.updated = st.updated;
     state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
-    if (!state.stations.some(s => s.id === state.selected)) state.selected = [...state.stations].sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id;
+    if (!placed().some(s => s.id === state.selected)) state.selected = placed().map(s => goodOnly(s, Date.now())).sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id; // a misplaced or saved-but-gone station is never picked; default: deepest good HS
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;
     lastLoad = Date.now();
     if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); } // restyle polygons for the new bulletin
