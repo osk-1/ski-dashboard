@@ -21,7 +21,6 @@ To record now: Actions tab → "Record snow data" → Run workflow, tick `force`
 1. Settings → Pages → Source: **GitHub Actions**.
 2. Fine-grained personal access token: repository access only `osk-1/ski-dashboard`, permission Actions: Read and write, with an expiry (note the renewal date).
 3. External scheduler (e.g. cron-job.org, timezone Europe/Vienna) jobs `0 6,7 * * *`, `0,30 8-14 * * *`, `0 15-19 * * *`, each `POST https://api.github.com/repos/osk-1/ski-dashboard/actions/workflows/fetch.yml/dispatches` with headers `Authorization: Bearer <token>`, `Accept: application/vnd.github+json` and body `{"ref":"main"}`.
-4. After the first successful deploy: `git rm -r --cached data`, add `data/` to `.gitignore`, commit. (Until then `data/` in `main` seeds the first run.)
 
 ## Stations
 

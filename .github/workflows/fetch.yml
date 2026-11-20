@@ -59,7 +59,7 @@ jobs:
           echo "run=$run" >> "$GITHUB_OUTPUT"
           echo "gate: run=$run"
       - name: Download live data
-        # Bootstrap: while data/ is still committed in main, it is the seed and nothing is downloaded.
+        # data/ is no longer in git; download it from the live site (a leftover local copy is used as-is).
         if: steps.gate.outputs.run == 'true' && hashFiles('data/readings.json') == ''
         run: |
           mkdir -p data
