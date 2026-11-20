@@ -11,7 +11,7 @@ Live page: https://osk-1.github.io/ski-dashboard/
    17:10 Vienna time (GitHub can delay scheduled runs by 10–30 min) and commits the results in `data/`:
    - `stations.json`: current readings per station (see below)
    - `forecast.json`: 5-day snowfall and min/max temperature per station
-   - `readings.json`: HS per station at every 07/12/17 slot (the history)
+   - `readings.json`: HS per station at every 07/12/17 slot (the history, last 60 days)
    - `danger.json`: avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`, and from the Vorarlberg bulletin `AT-08-03-01`, `AT-08-03-02`, `AT-08-04`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current. The Vorarlberg bulletin 404s until its first bulletin of the season (usually early December); a bulletin that fails keeps its regions from the last run
 2. GitHub Pages serves `index.html`, which reads those files.
 

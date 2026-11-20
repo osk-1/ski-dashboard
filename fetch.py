@@ -4,7 +4,7 @@
 Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
   data/forecast.json   5-day snowfall and min/max temperature per station
-  data/readings.json   {slot: {t, hs}} history of snow stations; slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, never pruned
+  data/readings.json   {slot: {t, hs}} history of snow stations; slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Vienna")
 SLOT_HOURS = (7, 12, 17)
+KEEP_DAYS = 60
 # Feed IDs (LWD-Nummer, or feature id when none): snow stations, then wind stations
 STATIONS = ("SAUL2", "SKAP2", "SAAU2", "SAGA2", "c9b477f0-c934-013d-99fc-5af9cc682f9b", "KDIA2",
             "SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1")
@@ -122,6 +123,11 @@ def tawes_history(gj, slot_keys):
             if i is not None and d[i] is not None:
                 out.setdefault(k, {})["TAWES-" + f["properties"]["station"]] = depth(d[i])
     return out
+
+
+def prune(readings, now):
+    cutoff = (now - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%dT00")  # keys sort lexicographically
+    return {k: v for k, v in readings.items() if k >= cutoff}
 
 
 def slots(days, now):
@@ -266,6 +272,7 @@ def main(days):
                     readings.setdefault(k, {"t": iso[k], "hs": {}})["hs"][st["id"]] = cm
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
+    readings = prune(readings, now)
     with open("data/readings.json", "w") as fh:
         json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
 
@@ -298,6 +305,8 @@ def main(days):
 
 
 def selftest():
+    r = {"2026-09-20T12": {}, "2026-09-21T07": {}, "2026-11-19T07": {}}
+    assert sorted(prune(r, datetime(2026, 11, 20, 8, tzinfo=TZ))) == ["2026-09-21T07", "2026-11-19T07"]  # cutoff 2026-09-21
     s = datetime(2026, 11, 19, 7, tzinfo=TZ)
     assert snapshot_url(s).endswith("2026-11-19_06-00_stations.geojson")
     assert snapshot_url(datetime(2026, 7, 1, 7, tzinfo=TZ)).endswith("2026-07-01_05-00_stations.geojson")  # summer time
