@@ -8,6 +8,9 @@ const stations = read("stations"), forecast = read("forecast"), danger = read("d
 add(stations); stations.stations.forEach(add);
 add(forecast); Object.values(forecast.points).forEach(add);
 Object.values(read("readings")).forEach(add); // slot keys are dynamic; the keys inside a slot are the fields
+const hourly = read("hourly");
+add(hourly); add(hourly.model);
+Object.values(hourly.hours).forEach(add); // hour keys are dynamic; the keys inside an hour are the fields
 add(danger);
 for (const r of Object.values(danger.regions)) { add(r); r.ratings.forEach(add); r.problems.forEach(add); }
 

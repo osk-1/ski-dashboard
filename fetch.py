@@ -4,6 +4,7 @@
 Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
   data/forecast.json   5-day snowfall and min/max temperature per station
+  data/hourly.json     {"model": {source, issued}, "hours": {local "YYYY-MM-DDTHH": {field: {stationId: value}}}}, rolling 7 days (+ model hours ahead); see README
   data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
@@ -45,6 +46,9 @@ STATIONS = (
     "IPIS1",
 )
 FIELDS = ("hs", "lt", "wg", "wg_boe", "wr")  # per-slot maps in readings.json
+HOURLY_DAYS = 7
+HFIELDS = ("lt", "oft", "rh", "hs", "hr", "pr", "pm", "sm", "mt", "wg", "wg_boe", "wr")  # per-hour maps in hourly.json
+MEASURED = ("lt", "oft", "rh", "hs", "wg", "wg_boe", "wr")  # what makes a Tirol hour "present" (not model, not derived)
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
@@ -146,26 +150,44 @@ def merge(readings, k, t, maps):
         slot.setdefault(f, {}).update(maps.get(f, {}))
 
 
-def smet_history(text, slot_times):
-    """{local slot key: {field: value}} from a SMET file (UTC ISO timestamps; HS m, TA K, VW/VW_MAX m/s); absent fields skipped."""
+def smet_table(text):
+    """{UTC timestamp: {column: float}} from a SMET file; nodata and bad cells omitted (one bad cell must not drop the row)."""
     head, _, data = text.partition("[DATA]")
     hdr = {k.strip(): v.strip() for k, _, v in (ln.partition("=") for ln in head.splitlines()) if v}
-    cols, nodata = hdr["fields"].split(), float(hdr.get("nodata", -999))
-    conv = {"hs": ("HS", lambda x: depth(x * 100)), "lt": ("TA", lambda x: num(x - 273.15)), "wg": ("VW", kmh), "wg_boe": ("VW_MAX", kmh), "wr": ("DW", num)}
-    want = {t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"): t.strftime("%Y-%m-%dT%H") for t in slot_times}
+    cols, nodata = hdr["fields"].split()[1:], float(hdr.get("nodata", -999))
     out = {}
-
-    def cell(r, c):  # one bad cell must not drop the row
-        try:
-            x = float(r[cols.index(c)])
-        except (IndexError, ValueError):
-            return None
-        return None if x == nodata else x
-
     for r in (ln.split() for ln in data.splitlines()):
-        if r and r[0] in want:
-            out[want[r[0]]] = {k: fn(x) for k, (c, fn) in conv.items() if c in cols and (x := cell(r, c)) is not None}
+        if r:
+            out[r[0]] = row = {}
+            for c, x in zip(cols, r[1:]):
+                try:
+                    if float(x) != nodata:
+                        row[c] = float(x)
+                except ValueError:
+                    pass
     return out
+
+
+SMET_CONV = {
+    "lt": ("TA", lambda x: num(x - 273.15)),
+    "rh": ("RH", lambda x: num(x * 100)),
+    "hs": ("HS", lambda x: depth(x * 100)),
+    "wg": ("VW", kmh),
+    "wg_boe": ("VW_MAX", kmh),
+    "wr": ("DW", num),
+}
+
+
+def smet_hourly(tab):
+    """{local hour key: {field: value}} from smet_table (5-min UTC rows; HS m, TA K, RH 0–1, VW m/s); pr = PSUM sum of the 12 rows ending at HH:00, null if any is missing."""
+    out = {}
+    for ts, r in tab.items():
+        if ts.endswith(":00:00Z"):
+            t = datetime.fromisoformat(ts)
+            ps = [tab.get((t - timedelta(minutes=5 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"), {}).get("PSUM") for i in range(12)]
+            v = {k: fn(r[c]) for k, (c, fn) in SMET_CONV.items() if c in r}
+            out[hkey(t)] = {**v, "pr": None if None in ps else num(sum(ps))}
+    return {k: {f: x for f, x in v.items() if x is not None} for k, v in out.items()}
 
 
 def parse_tawes(gj, names):
@@ -197,26 +219,84 @@ def parse_tawes(gj, names):
     return out
 
 
-def tawes_history(gj, slot_keys):
-    """{local slot key: {field: {TAWES-id: value}}} from a historical geojson (UTC 10-min timestamps); absent parameters skipped."""
-    ts = [datetime.fromisoformat(t).astimezone(TZ).strftime("%Y-%m-%dT%H:%M") for t in gj["timestamps"]]
+def tawes_hourly(gj):
+    """{local hour key: {field: {TAWES-id: value}}} from a historical 10-min geojson: instant values at HH:00, pr = RR sum of the 6 intervals ending at HH:00 (null if any is missing)."""
+    # shortcut: each timestamp taken as the end of its 10-min interval (RR is named "Niederschlag der letzten 10 Minuten"); unverified against GeoSphere docs
+    ts = [datetime.fromisoformat(t) for t in gj["timestamps"]]
+    idx = {t: i for i, t in enumerate(ts)}
     out = {}
     for f in gj["features"]:
         p = f["properties"]["parameters"]
         col = lambda n: (p.get(n) or {}).get("data") or [None] * len(ts)
-        for k in slot_keys:
-            if k + ":00" in ts:
-                i = ts.index(k + ":00")
+        rr = col("RR")
+        for i, t in enumerate(ts):
+            if t.minute == 0:
+                ps = [rr[idx[x]] if (x := t - timedelta(minutes=10 * j)) in idx else None for j in range(6)]
                 add(
-                    out.setdefault(k, {x: {} for x in FIELDS}),
+                    out.setdefault(hkey(t), {x: {} for x in HFIELDS}),
                     "TAWES-" + f["properties"]["station"],
                     hs=depth(col("SCHNEE")[i]),
                     lt=num(col("TL")[i]),
+                    rh=num(col("RF")[i]),
+                    pr=None if None in ps else num(sum(ps)),
                     wg=kmh(col("FF")[i]),
                     wg_boe=kmh(col("FFX")[i]),
                     wr=num(col("DD")[i]),
                 )
     return out
+
+
+def hkey(t):
+    return t.astimezone(TZ).strftime("%Y-%m-%dT%H")
+
+
+def hmerge(hours, k, maps):
+    """Merge {field: {id: value}} into hours[k], skipping empty maps."""
+    for f, m in maps.items():
+        if m:
+            hours.setdefault(k, {}).setdefault(f, {}).update(m)
+
+
+def tirol_hours(feats, by_uuid, only=None):
+    """{local hour key: {field: {id: value}}} from avalanche.report features, keyed by each feature's own date floored to the hour; with only, other hours are dropped (an archive feature repeating an old measurement must not pose as a new hour)."""
+    out = {}
+    for f in feats:
+        p, st = f["properties"], by_uuid.get(f["id"])
+        if st and p.get("date") and (k := hkey(datetime.fromisoformat(p["date"]))) == (only or k):
+            add(
+                out.setdefault(k, {x: {} for x in HFIELDS}),
+                st["id"],
+                lt=num(p.get("LT")),
+                oft=num(p.get("OFT")),
+                rh=num(p.get("RH")),
+                hs=depth(p.get("HS")) if st["type"] == "snow" else None,
+                wg=num(p.get("WG")),
+                wg_boe=num(p.get("WG_BOE")),
+                wr=num(p.get("WR")),
+            )
+    return out
+
+
+def missing_hours(hours, ids, now):
+    """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value."""
+    have = {k for k, v in hours.items() if any(id in v.get(f, {}) for f in MEASURED for id in ids)}
+    t = now.astimezone(TZ).replace(minute=0, second=0, microsecond=0)
+    out = [t - timedelta(hours=i) for i in range(HOURLY_DAYS * 24, 0, -1)]
+    return [x for x in out if hkey(x) not in have]
+
+
+def hs_rise(hours, ids):
+    """hr[id] at k = positive HS change from the hour before (0 when it fell or stayed); only where both hours have hs."""
+    for k, v in hours.items():
+        prev = hours.get((datetime.strptime(k, "%Y-%m-%dT%H") - timedelta(hours=1)).strftime("%Y-%m-%dT%H"), {}).get("hs", {})
+        hr = {id: num(max(0.0, x - prev[id])) for id, x in v.get("hs", {}).items() if id in ids and id in prev}
+        if hr:
+            v["hr"] = hr
+
+
+def prune_hours(hours, now):
+    cutoff = hkey(now - timedelta(days=HOURLY_DAYS))  # keys sort lexicographically; future model hours stay
+    return {k: v for k, v in hours.items() if k >= cutoff}
 
 
 def prune(readings, now):
@@ -285,6 +365,27 @@ def parse_danger(bulletin, ids):
     return out
 
 
+def parse_open_meteo(res, ids, days):
+    """Open-Meteo multi-point response -> (forecast.json points, {hour key: {pm, sm, mt: {id: value}}}). past_days entries are skipped via the time arrays."""
+    pts, model = {}, {}
+    for id, r in zip(ids, res):
+        h, d = r["hourly"], r["daily"]
+        i, j = d["time"].index(days[0]), h["time"].index(days[0] + "T00:00")
+        sd = h["snow_depth"][j:]  # metres, hourly
+        pts[id] = {
+            "snowfall": d["snowfall_sum"][i:],
+            "tmin": d["temperature_2m_min"][i:],
+            "tmax": d["temperature_2m_max"][i:],
+            "depth": [
+                None if all(v is None for v in sd[n * 24 : (n + 1) * 24]) else round(100 * max(v for v in sd[n * 24 : (n + 1) * 24] if v is not None))
+                for n in range(len(days))
+            ],
+        }
+        for t, pm, sm, mt in zip(h["time"], h["precipitation"], h["snowfall"], h["temperature_2m"]):
+            add(model.setdefault(t[:13], {"pm": {}, "sm": {}, "mt": {}}), id, pm=num(pm), sm=num(sm), mt=num(mt))
+    return pts, model
+
+
 def forecast(stations):
     days = [(datetime.now(TZ).date() + timedelta(days=i)).isoformat() for i in range(5)]
     try:
@@ -296,23 +397,11 @@ def forecast(stations):
             ]
         )
         res = get_json(
-            "https://api.open-meteo.com/v1/forecast?" + q + "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max&hourly=snow_depth"
-            "&forecast_days=5&timezone=Europe%2FVienna"
+            "https://api.open-meteo.com/v1/forecast?" + q + "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max"
+            "&hourly=snow_depth,temperature_2m,precipitation,snowfall&past_days=2&forecast_days=5&timezone=Europe%2FVienna"
         )
-        res = res if isinstance(res, list) else [res]
-        pts = {}
-        for s, r in zip(stations, res):
-            depth = r["hourly"]["snow_depth"]  # metres, hourly
-            pts[s["id"]] = {
-                "snowfall": r["daily"]["snowfall_sum"],
-                "tmin": r["daily"]["temperature_2m_min"],
-                "tmax": r["daily"]["temperature_2m_max"],
-                "depth": [
-                    None if all(v is None for v in depth[i * 24 : (i + 1) * 24]) else round(100 * max(v for v in depth[i * 24 : (i + 1) * 24] if v is not None))
-                    for i in range(5)
-                ],
-            }
-        return {"source": "Open-Meteo", "days": days, "points": pts}
+        pts, model = parse_open_meteo(res if isinstance(res, list) else [res], [s["id"] for s in stations], days)
+        return {"source": "Open-Meteo", "days": days, "points": pts}, model
     except Exception as e:
         print("Open-Meteo failed, falling back to MET Norway:", e, file=sys.stderr)
     pts = {}
@@ -325,12 +414,13 @@ def forecast(stations):
             "tmax": [d[x][2] if x in d else None for x in days],
             "depth": None,  # met.no has no snow-depth forecast
         }
-    return {"source": "MET Norway (snowfall estimated from precipitation)", "days": days, "points": pts}
+    return {"source": "MET Norway (snowfall estimated from precipitation)", "days": days, "points": pts}, None
 
 
 def main(days):
     now = datetime.now(TZ)
-    stations = [station(f) for f in get_json(LWD + "stations.geojson")["features"] if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
+    live = get_json(LWD + "stations.geojson")["features"]
+    stations = [station(f) for f in live if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
     for m in set(STATIONS) - {x["id"] for x in stations}:
         print("station missing from feed:", m, file=sys.stderr)
     try:  # secondary source: a failure must not abort the run
@@ -353,6 +443,20 @@ def main(days):
             readings = json.load(fh)
     except FileNotFoundError:
         readings = {}
+    try:
+        with open("data/hourly.json") as fh:
+            hourly = json.load(fh)
+    except FileNotFoundError:
+        hourly = {"model": {"source": None, "issued": None}, "hours": {}}
+    hours = hourly["hours"]
+    for t in missing_hours(hours, STATIONS, now):  # Tirol archive: only hours not yet recorded
+        try:
+            for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid, hkey(t)).items():
+                hmerge(hours, k, maps)
+        except Exception as e:
+            print("skip hour", t.isoformat(), e, file=sys.stderr)
+    for k, maps in tirol_hours(live, by_uuid).items():
+        hmerge(hours, k, maps)
     sl = slots(days, now)
     iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
     for s in sl:
@@ -375,11 +479,14 @@ def main(days):
                     wr=num(p.get("WR")),
                 )
         merge(readings, s.strftime("%Y-%m-%dT%H"), s.isoformat(), maps)  # merge: keep other sources' ids (TAWES)
-    try:  # TAWES values at the slot times, one historical request
+    try:  # TAWES slots and hours, one historical request
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
-        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE,TL,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(sl[0])}&end={u(now)}")
-        for k, maps in tawes_history(gj, list(iso)).items():
-            merge(readings, k, iso[k], maps)
+        start = min(sl[:1] + [now - timedelta(days=HOURLY_DAYS, hours=1)])  # whole window each run, so TAWES gaps heal on their own
+        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=TL,RF,RR,SCHNEE,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(start)}&end={u(now)}")
+        for k, maps in tawes_hourly(gj).items():
+            hmerge(hours, k, maps)
+            if k in iso:
+                merge(readings, k, iso[k], {f: maps[f] for f in FIELDS})
     except Exception as e:
         print("TAWES history failed:", e, file=sys.stderr)
     for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
@@ -388,8 +495,10 @@ def main(days):
                 req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
                 with urllib.request.urlopen(req, timeout=30) as r:
                     txt = gzip.decompress(r.read()).decode()
-                for k, vals in smet_history(txt, sl).items():
-                    merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items()})
+                for k, vals in smet_hourly(smet_table(txt)).items():
+                    hmerge(hours, k, {f: {st["id"]: v} for f, v in vals.items()})
+                    if k in iso:
+                        merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items() if f in FIELDS})
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
     readings = prune(readings, now)
@@ -400,13 +509,22 @@ def main(days):
         json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
     fsrc = "failed"
     try:  # secondary source: a failure must not abort the run
-        fc = forecast(stations)
+        fc, model = forecast(stations)
+        for k, maps in (model or {}).items():  # model values of this run replace earlier ones at the same hours
+            hours.setdefault(k, {}).update(maps)
+        hourly["model"] = (
+            {"source": "Open-Meteo", "issued": now.isoformat(timespec="minutes")} if model else {"source": None, "issued": hourly["model"].get("issued")}
+        )
         fc["generated"] = now.isoformat(timespec="minutes")
         with open("data/forecast.json", "w") as fh:
             json.dump(fc, fh)
         fsrc = fc["source"]
     except Exception as e:
         print("forecast failed:", e, file=sys.stderr)
+    hs_rise(hours, STATIONS)
+    hourly["hours"] = prune_hours(hours, now)
+    with open("data/hourly.json", "w") as fh:
+        json.dump(hourly, fh, sort_keys=True, separators=(",", ":"))
     ids = {s["region"].split()[0] for s in stations if s.get("region")}
     try:  # a bulletin that fails keeps its regions from the last run
         with open("data/danger.json") as fh:
@@ -421,7 +539,7 @@ def main(days):
     if regions:
         with open("data/danger.json", "w") as fh:
             json.dump({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
-    print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fsrc}")
+    print(f"{len(stations)} stations, {len(readings)} reading slots, {len(hourly['hours'])} hours, forecast: {fsrc}")
 
 
 def selftest():
@@ -505,7 +623,8 @@ def selftest():
     g, a = parse_tawes(gj, TAWES)
     assert (g["id"], g["type"], g["hs"], g["wg"], g["wg_boe"], g["wr"], g["lt"], g["alt"]) == ("TAWES-11110", "wind", None, 19.8, 34.6, 273.0, -2.1, 2079)
     assert (a["type"], a["hs"], a["wg"]) == ("snow", 0.0, 0.7)
-    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {
+    nonempty = lambda h: {k: {f: m for f, m in v.items() if m} for k, v in h.items()}
+    assert nonempty(tawes_hourly(gj)) == {
         "2026-11-19T07": {  # 06:00 UTC = 07:00 CET; Galzig has no snow, 11311 no FF
             "hs": {"TAWES-11311": 0.0},
             "lt": {"TAWES-11110": -2.1, "TAWES-11311": 2.9},
@@ -514,6 +633,25 @@ def selftest():
             "wr": {"TAWES-11110": 273.0, "TAWES-11311": 226.0},
         }
     }
+    rr = {
+        "timestamps": [f"2026-11-19T{h:02}:{m:02}+00:00" for h, m in [(5, 0), (5, 10), (5, 20), (5, 30), (5, 40), (5, 50), (6, 0), (6, 10), (7, 0)]],
+        "features": [],
+    }
+    rr["features"] = [
+        {
+            "properties": {
+                "station": "1",
+                "parameters": {"RR": {"data": [9, 0.1, 0.2, 0, 0, 0.3, 0.4, None, 1]}, "RF": {"data": [None] * 6 + [88.0, None, None]}},
+            }
+        }
+    ]
+    th = tawes_hourly(rr)  # 07 CET = 05:10..06:00 UTC summed; 06 and 08 CET lack intervals -> null, not a partial sum
+    assert (th["2026-11-19T07"]["pr"], th["2026-11-19T07"]["rh"], th["2026-11-19T06"]["pr"], th["2026-11-19T08"]["pr"]) == (
+        {"TAWES-1": 1.0},
+        {"TAWES-1": 88.0},
+        {},
+        {},
+    )
     no = {"hs": {}, "lt": {}, "wg": {}, "wg_boe": {}, "wr": {}}
     old = {"2026-11-19T07": {"t": "x", "hs": {"A": 1.0}}}  # old slot without the new maps
     merge(old, "2026-11-19T07", "t", {"hs": {"B": 2.0}, "lt": {"A": -1.0}})
@@ -553,7 +691,7 @@ def selftest():
         "SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
         "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n"
     )
-    assert smet_history(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # no VW_MAX/DW columns; nodata per field
+    assert smet_hourly(smet_table(smet)) == {  # no VW_MAX/DW columns; nodata per field
         "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0},
         "2026-11-19T12": {"lt": -2.1},
         "2026-11-19T17": {"hs": 0.0, "lt": -3.1, "wg": 1.8},
@@ -561,11 +699,60 @@ def selftest():
     sm2 = smet.replace("2026-11-19T11:00:00Z 271.0 -999 -999", "2026-11-19T11:00:00Z 271.0 abc").replace(
         "2026-11-19T16:00:00Z 270.0 -0.01 0.5", "2026-11-19T16:00:00Z 270.1 0.15"
     )
-    assert smet_history(sm2, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # short row and non-numeric cell keep other fields
+    assert smet_hourly(smet_table(sm2)) == {  # short row and non-numeric cell keep other fields
         "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0},
         "2026-11-19T12": {"lt": -2.1},
         "2026-11-19T17": {"hs": 15.0, "lt": -3.0},
     }
+    rows = "".join(f"2026-11-19T{5 + (m + 5) // 60:02}:{(m + 5) % 60:02}:00Z 0.9 {'-999' if m == 0 else '0.1'}\n" for m in range(0, 120, 5))  # 05:05..07:00 UTC
+    assert smet_hourly(smet_table("[HEADER]\nfields = timestamp RH PSUM\n[DATA]\n" + rows)) == {  # PSUM: 12 values ending at HH:00, 05:05 missing
+        "2026-11-19T07": {"rh": 90.0},
+        "2026-11-19T08": {"rh": 90.0, "pr": 1.2},
+    }
+    by = {"u1": {"id": "SKAP2", "type": "snow"}, "u2": {"id": "SKAP1", "type": "wind"}}
+    feats = [
+        {"id": "u1", "properties": {"date": "2026-11-20T07:10:00+01:00", "LT": -2.8, "OFT": -3.2, "RH": 91.6, "HS": 30.8}},
+        {"id": "u2", "properties": {"date": "2026-11-20T06:00:00+01:00", "LT": -4.6, "HS": 5, "WG": 49.4}},  # stale: repeats the 06 reading
+        {"id": "x", "properties": {"date": "2026-11-20T07:00:00+01:00", "LT": 1}},
+    ]
+    th = tirol_hours(feats, by, "2026-11-20T07")
+    assert nonempty(th) == {"2026-11-20T07": {"lt": {"SKAP2": -2.8}, "oft": {"SKAP2": -3.2}, "rh": {"SKAP2": 91.6}, "hs": {"SKAP2": 30.8}}}
+    assert sorted(tirol_hours(feats, by)) == ["2026-11-20T06", "2026-11-20T07"]  # live feed: each at its own hour; wind station hs ignored
+    now = datetime(2026, 11, 20, 8, 30, tzinfo=TZ)
+    hm = {"2026-11-20T07": {"lt": {"SKAP2": 1}}, "2026-11-20T06": {"pm": {"SKAP2": 1}, "lt": {"TAWES-1": 1}}}  # model/other sources don't count
+    mh = [hkey(t) for t in missing_hours(hm, STATIONS, now)]
+    assert (len(mh), mh[0], mh[-2:]) == (167, "2026-11-13T08", ["2026-11-20T05", "2026-11-20T06"])
+    hr = {
+        "2026-11-20T06": {"hs": {"SKAP2": 30.0, "V": 1}},
+        "2026-11-20T07": {"hs": {"SKAP2": 30.8, "V": 5}},
+        "2026-11-20T08": {"hs": {"SKAP2": 30.1}},
+        "2026-11-20T10": {"hs": {"SKAP2": 40}},
+    }
+    hs_rise(hr, STATIONS)
+    assert [hr[k].get("hr") for k in sorted(hr)] == [None, {"SKAP2": 0.8}, {"SKAP2": 0.0}, None]  # no negative, no gap-spanning rise, Tirol ids only
+    assert sorted(prune_hours({"2026-11-13T07": 1, "2026-11-13T08": 1, "2026-11-25T23": 1}, now)) == ["2026-11-13T08", "2026-11-25T23"]
+    om = {
+        "daily": {
+            "time": ["2026-11-18", "2026-11-19", "2026-11-20"],
+            "snowfall_sum": [9, 9, 2.0],
+            "temperature_2m_min": [9, 9, -5],
+            "temperature_2m_max": [9, 9, 0],
+        },
+        "hourly": {
+            "time": [f"2026-11-{d}T{h:02}:00" for d in (18, 19, 20) for h in range(24)],
+            "snow_depth": [9.0] * 48 + [0.5] * 23 + [None],
+            "temperature_2m": [-1.04] * 72,
+            "precipitation": [0.2] * 72,
+            "snowfall": [None] * 72,
+        },
+    }
+    pts, model = parse_open_meteo([om], ["A"], ["2026-11-20"])
+    assert pts == {"A": {"snowfall": [2.0], "tmin": [-5], "tmax": [0], "depth": [50]}}  # past_days entries skipped
+    assert (len(model), model["2026-11-18T00"], model["2026-11-20T23"]) == (
+        72,
+        {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}},
+        {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}},
+    )
     print("selftest ok")
 
 
