@@ -293,20 +293,20 @@ function initMap() {
     const d = lc = L.DomUtil.create("div", "lay"), bar = L.DomUtil.create("div", "leaflet-bar", d), b = L.DomUtil.create("button", "", bar), p = lp = L.DomUtil.create("div", "lp", d);
     b.type = "button"; b.title = "Map layers"; b.setAttribute("aria-label", "Map layers"); b.setAttribute("aria-controls", "lp");
     b.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 15 5.5 8 9.5 1 5.5ZM1 8.5l7 4 7-4"/></svg>';
-    p.id = "lp"; p.hidden = phone(); b.setAttribute("aria-expanded", !p.hidden);
+    p.id = "lp"; p.hidden = true; b.setAttribute("aria-expanded", !p.hidden);
     const stn = c => state.stations.filter(s => catOf(s) === c).sort((a, b) => b.alt - a.alt);
     const row = (attr, id, text, extra = "") => `<label><input type="checkbox" ${attr}="${esc(id)}"> <span>${esc(text)}${extra}</span></label>`;
     const stale = Object.values(state.danger?.regions || {}).some(r => new Date(r.valid_end) < new Date());
     p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : []].join("") +
-      CATS.filter(([k]) => stn(k).length).map(([k, n]) => `<div role="group" aria-label="${n} stations"><div class="gh"><b>${n} stations</b><button type="button" data-set="${k}:1" aria-label="All ${n.toLowerCase()} stations">All</button><button type="button" data-set="${k}:0" aria-label="No ${n.toLowerCase()} stations">None</button></div>${stn(k).map(s => row("data-sid", s.id, s.name, ` <small>${s.alt} m</small>`)).join("")}</div>`).join("");
-    const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : !lay.hide.includes(i.dataset.sid); };
+      CATS.filter(([k]) => stn(k).length).map(([k, n]) => `<div role="group" aria-label="${n} stations"><div class="gh"><b>${n} stations</b><button type="button" data-set="${k}:1" aria-label="All ${n.toLowerCase()} stations">All</button><button type="button" data-set="${k}:0" aria-label="No ${n.toLowerCase()} stations">None</button></div>${stn(k).map(s => row("data-stn", s.id, s.name, ` <small>${s.alt} m</small>`)).join("")}</div>`).join("");
+    const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : !lay.hide.includes(i.dataset.stn); };
     const size = () => { p.style.maxHeight = map.getSize().y - 80 + "px"; };
     const done = () => { sync(); try { localStorage.setItem("layers", JSON.stringify(lay)); } catch {} renderSummary(); renderMap(); renderTable(); };
-    p.addEventListener("change", e => { const i = e.target; if (i.dataset.cat) lay.on[i.dataset.cat] = i.checked; else lay.hide = i.checked ? lay.hide.filter(x => x !== i.dataset.sid) : [...lay.hide, i.dataset.sid]; done(); });
+    p.addEventListener("change", e => { const i = e.target; if (i.dataset.cat) lay.on[i.dataset.cat] = i.checked; else lay.hide = i.checked ? lay.hide.filter(x => x !== i.dataset.stn) : [...lay.hide, i.dataset.stn]; done(); });
     p.addEventListener("click", e => {
       const t = e.target.closest("button"); if (!t) return;
       const [c, on] = t.dataset.set.split(":"), ids = state.stations.filter(s => catOf(s) === c).map(s => s.id);
-      lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; done();
+      lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; if (on === "1") lay.on[c] = true; done();
     });
     b.onclick = () => { p.hidden = !p.hidden; b.setAttribute("aria-expanded", !p.hidden); renderMap(); }; // labels dodge the open panel
     map.on("resize", size); size(); sync();
@@ -380,7 +380,7 @@ function renderMap() {
     const spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW); // the selected station always keeps its name, even if it must overlap
     taken.push(spot.box);
     const dir = spot.dir, offset = spot.off;
-    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", e => select(state.stations.reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(grp); // overlapping pads: pick the station nearest the tap // 44px touch target
+    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0 }).on("click", e => select(shown().reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(grp); // overlapping pads: pick the station nearest the tap // 44px touch target
     // wind-only: just the arrow (or a calm ring) centred in a 44px box, haloed when selected; snow stations keep the coloured dot
     const m = wo ? L.marker([s.lat, s.lon], { keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [44, 44], iconAnchor: [22, 22], html: `<svg width="44" height="44" viewBox="-22 -22 44 44"><circle r="13" fill="${sel ? css("--panel") : "transparent"}"${sel ? ` stroke="${css("--fg")}" stroke-width="3"` : ""}/>${arrowOn(s) ? arrow(0, 0, (s.wr + 180) % 360, css("--wind")) : `<circle r="4.5" fill="${css("--panel")}" stroke="${css("--wind")}" stroke-width="2"/>`}</svg>` }) }).addTo(grp)
       : L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1 }).addTo(grp);
