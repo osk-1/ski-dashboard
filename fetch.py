@@ -5,14 +5,18 @@ Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
   data/forecast.json   5-day snowfall and min/max temperature per station
   data/hourly.json     {"model": {source, issued}, "hours": {local "YYYY-MM-DDTHH": {field: {stationId: value}}}}, rolling 7 days (+ model hours ahead); see README
+  data/health.json     {run, sources: {tirol, tawes, vorarlberg, model, bulletins: {ok, error, detail}}, flagged, offline}; see README
   data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
 """
 
+import contextlib
 import gzip
+import io
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -65,6 +69,46 @@ BULLETINS = {
     "LWD Vorarlberg": "https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json",
 }
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
+# Plausibility checks (flag only, never change a value); thresholds to tune
+LIMITS = {"hs": (0, 800), "lt": (-45, 35), "oft": (-45, 35), "wg": (0, 250), "wg_boe": (0, 250), "wr": (0, 360), "rh": (0, 100)}  # -> "out of range"
+JUMP = {"hs": (-15, 30), "lt": (-8, 8)}  # allowed change latest hour vs hour before -> "jump"
+STUCK_HOURS, STUCK_WIND = 6, 5  # identical lt (wr: while wg > 5 km/h) for 6 consecutive hours -> "stuck"
+FROZEN_HOURS = 3  # wg == 0 for 3 latest hours while lt < 0 and rh > 95 -> "sensor frozen?"
+FUTURE = timedelta(minutes=10)  # measurement time this far ahead of the run -> "time in future"
+LOCATION_M = 500  # farther from REFERENCE, or another name -> flags["station"] = "location mismatch"
+VALUES = ("hs", "n24", "hsd24", "lt", "wg", "wg_boe", "wr")  # measured value fields of a station dict
+# id: (name, lat, lon) as the feeds reported them on 2026-11-20 (TAWES: GeoSphere's coordinates)
+REFERENCE = {
+    "KSIN1": ("Kappl Kapplerkopf", 47.06064, 10.3255),
+    "SKAP2": ("Kapall Schneestation", 47.14749, 10.25878),
+    "SKAP1": ("Kapall Windstation", 47.14908, 10.24794),
+    "KSIN2": ("Kappl Sinsenergampen", 47.06064, 10.34034),
+    "KSPI2": ("Kappl Spidur Alpe", 47.09232, 10.4119),
+    "SAGA1": ("Gampberg Windstation", 47.10991, 10.27761),
+    "SAGA2": ("Gampberg Schneestation", 47.11174, 10.27135),
+    "SAYO1": ("Osthangbahn Young", 47.13324, 10.22553),
+    "IPIS2": ("Pischgraben", 47.0182, 10.26762),
+    "SAAU2": ("Äußere Rendlalpe", 47.1297, 10.31545),
+    "aea1a765-2cff-3a00-bb88-3cfed1dfd875": ("Ganatschalm", 47.1377, 10.3968),
+    "SAAU1": ("Hochkar", 47.11424, 10.31372),
+    "KDIA2": ("Dias", 47.07911, 10.34524),
+    "c9b477f0-c934-013d-99fc-5af9cc682f9b": ("Kartellboden-Damm", 47.06999, 10.26469),
+    "SARE2": ("Rendl Riffel 1", 47.07774, 10.2662),
+    "IPIS1": ("Madleinkopf", 47.01712, 10.24878),
+    "KDIA1": ("Lattejoch", 47.08458, 10.3386),
+    "SAUL2": ("Ulmerhütte", 47.14702, 10.21192),
+    "KGRO1": ("Kappl Großgfallkopf", 47.10168, 10.40883),
+    "SARE1": ("Salzboden", 47.10168, 10.26708),
+    "TAWES-11110": ("Galzig", 47.12972, 10.23028),
+    "TAWES-11307": ("Langen/Arlberg", 47.13167, 10.12333),
+    "TAWES-11311": ("St. Anton (Tal)", 47.13139, 10.26667),
+    "VOR-ALBO2": ("Albona", 47.1317, 10.17122),
+    "VOR-LANG1": ("Langen Blasegg", 47.14059, 10.11794),
+    "VOR-LECA1": ("Lech/Arlberg", 47.21, 10.14083),
+    "VOR-LECH1": ("Lech Kriegerhorn", 47.2142, 10.11432),
+    "VOR-VALL1": ("Valluga (Radar)", 47.1575, 10.21278),
+    "VOR-ZURS1": ("Zürs Hexenboden", 47.17359, 10.17078),
+}
 
 
 def get_json(url):
@@ -83,6 +127,10 @@ def num(v):
 
 def kmh(x):  # m/s -> km/h
     return None if x is None else num(x * 3.6)
+
+
+def vienna(s):
+    return None if s is None else datetime.fromisoformat(s).astimezone(TZ).isoformat()
 
 
 def depth(v):
@@ -108,7 +156,7 @@ def station(f):
         "wg": num(p.get("WG")),
         "wg_boe": num(p.get("WG_BOE")),
         "wr": num(p.get("WR")),
-        "date": p.get("date"),
+        "date": vienna(p.get("date")),
     }
 
 
@@ -132,7 +180,7 @@ def vor_station(f):
         "wg": num(scale("VW", 3.6)),
         "wg_boe": num(scale("VW_MAX", 3.6)),
         "wr": num(p.get("DW")),
-        "date": datetime.fromisoformat(p["date"]).astimezone(TZ).isoformat(),
+        "date": vienna(p["date"]),
     }
 
 
@@ -191,11 +239,15 @@ def smet_hourly(tab):
 
 
 def parse_tawes(gj, names):
-    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h."""
+    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h.
+    Parameters are staggered: date = newest measurement, dates = {field: time} for fields measured at another time."""
     out = []
     for f in gj["features"]:
         p, id = f["properties"]["parameters"], f["properties"]["station"]
-        v = lambda k: next((x for x in reversed(p.get(k, {}).get("data") or []) if x is not None), None)  # staggered: newest non-null
+        new = lambda k: next(((x, t) for x, t in reversed(list(zip(p.get(k, {}).get("data") or [], gj["timestamps"]))) if x is not None), (None, None))
+        v = lambda k: new(k)[0]
+        at = {f: vienna(new(k)[1]) for f, k in (("hs", "SCHNEE"), ("lt", "TL"), ("wg", "FF"), ("wg_boe", "FFX"), ("wr", "DD")) if new(k)[1]}
+        date = max(at.values(), key=datetime.fromisoformat, default=vienna(gj["timestamps"][-1]))
         out.append(
             {
                 "id": "TAWES-" + id,
@@ -213,7 +265,8 @@ def parse_tawes(gj, names):
                 "wg": kmh(v("FF")),
                 "wg_boe": kmh(v("FFX")),
                 "wr": num(v("DD")),
-                "date": gj["timestamps"][-1],
+                "date": date,
+                "dates": {f: t for f, t in at.items() if t != date},
             }
         )
     return out
@@ -298,6 +351,80 @@ def hs_rise(hours, ids):
 def prune_hours(hours, now):
     cutoff = hkey(now.astimezone(timezone.utc) - timedelta(days=HOURLY_DAYS))  # keys sort lexicographically; future model hours stay
     return {k: v for k, v in hours.items() if k >= cutoff}
+
+
+def series(hours, f, id, t, n):
+    """Values of f for id at the n hours ending at t's hour, newest first (None where missing); steps in UTC (DST-safe)."""
+    t = t.astimezone(timezone.utc)
+    return [hours.get(hkey(t - timedelta(hours=i)), {}).get(f, {}).get(id) for i in range(n)]
+
+
+def dist_m(a, b):
+    """Haversine distance in metres between (lat, lon) pairs."""
+    la1, lo1, la2, lo2 = map(math.radians, (*a, *b))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
+def check(st, hours, now):
+    """{field|"station": reason} for one station dict; flags only, never changes a value. Jump/stuck/frozen read the measured hourly series ending at the field's own measurement hour."""
+    id, fl = st["id"], {}
+    at = {f: datetime.fromisoformat(x) for f in VALUES if (x := (st.get("dates") or {}).get(f) or st.get("date"))}
+    for f, t in at.items():
+        if st.get(f) is not None and t > now + FUTURE:
+            fl[f] = "time in future"
+    for f, (lo, hi) in LIMITS.items():
+        if st.get(f) is not None and not lo <= st[f] <= hi:
+            fl.setdefault(f, "out of range")
+    for f, (fall, rise) in JUMP.items():
+        a, b = series(hours, f, id, at[f], 2) if f in at else (None, None)
+        if a is not None and b is not None and not fall <= a - b <= rise:
+            fl.setdefault(f, "jump")
+    for f in ("lt", "wr"):
+        if f in at:
+            v, w = series(hours, f, id, at[f], STUCK_HOURS), series(hours, "wg", id, at[f], STUCK_HOURS)
+            if v[0] is not None and v.count(v[0]) == STUCK_HOURS and (f == "lt" or all(x is not None and x > STUCK_WIND for x in w)):
+                fl.setdefault(f, "stuck")
+    if st.get("wg") is not None and st.get("wg_boe") is not None and st["wg_boe"] < st["wg"]:
+        fl.setdefault("wg_boe", "gust below mean")
+    if "wg" in at:
+        wg, lt, rh = (series(hours, f, id, at["wg"], FROZEN_HOURS) for f in ("wg", "lt", "rh"))
+        if all(w == 0 and c is not None and c < 0 and r is not None and r > 95 for w, c, r in zip(wg, lt, rh)):
+            for f in ("wg", "wg_boe", "wr"):
+                fl.setdefault(f, "sensor frozen?")
+    ref = REFERENCE.get(id)
+    if not ref or ref[0] != st.get("name") or st.get("lat") is None or dist_m(ref[1:], (st["lat"], st["lon"])) > LOCATION_M:
+        fl["station"] = "location mismatch"
+    return fl
+
+
+def hour_flags(hours):
+    """hours[k]["flags"] = {id: {field: "out of range"}} (limit checks only), recomputed each run."""
+    for v in hours.values():
+        fl = {}
+        for f, (lo, hi) in LIMITS.items():
+            for id, x in v.get(f, {}).items():
+                if not lo <= x <= hi:
+                    fl.setdefault(id, {})[f] = "out of range"
+        v.pop("flags", None)
+        if fl:
+            v["flags"] = fl
+
+
+def source_of(id):
+    return "tawes" if id.startswith("TAWES-") else "vorarlberg" if id.startswith("VOR-") else "tirol"
+
+
+def carry(path, src):
+    """Station dicts of source src from the previous stations.json, unchanged (old date included), so a failed source ages instead of vanishing."""
+    try:
+        with open(path) as fh:
+            prev = [s for s in json.load(fh)["stations"] if source_of(s["id"]) == src]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print("nothing to carry over for", src, e, file=sys.stderr)
+        return []
+    print(f"carrying over {len(prev)} {src} stations from the last run", file=sys.stderr)
+    return prev
 
 
 def prune(readings, now):
@@ -420,22 +547,33 @@ def forecast(stations):
 
 def main(days):
     now = datetime.now(TZ)
-    live = get_json(LWD + "stations.geojson")["features"]
+    src = {k: {"ok": True, "error": None, "detail": None} for k in ("tirol", "tawes", "vorarlberg", "model", "bulletins")}  # health.json
+
+    def fail(k, e):
+        src[k].update(ok=False, error=str(e))
+
+    live = get_json(LWD + "stations.geojson")["features"]  # primary source: a failure aborts the run
     stations = [station(f) for f in live if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
-    for m in set(STATIONS) - {x["id"] for x in stations}:
-        print("station missing from feed:", m, file=sys.stderr)
+    if gone := sorted(set(STATIONS) - {x["id"] for x in stations}):
+        print("station missing from feed:", *gone, file=sys.stderr)
+        src["tirol"]["detail"] = "missing from feed: " + ", ".join(gone)
     try:  # secondary source: a failure must not abort the run
         q = "tawes-v1-10min?parameters=SCHNEE,TL,FF,FFX,DD&station_ids=" + ",".join(TAWES)
         stations += parse_tawes(get_json(GEO + "current/" + q), TAWES)
     except Exception as e:
         print("GeoSphere TAWES failed:", e, file=sys.stderr)
+        fail("tawes", e)
+        stations += carry("data/stations.json", "tawes")
     try:  # secondary source: a failure must not abort the run
         vor = [vor_station(f) for f in get_json(VOR + "stations_vor.geojson")["features"] if f["properties"].get("shortName") in VOR_IDS]
         stations += vor
-        for m in set(VOR_IDS) - {x["id"][4:] for x in vor}:
-            print("station missing from Vorarlberg feed:", m, file=sys.stderr)
+        if gone := sorted(set(VOR_IDS) - {x["id"][4:] for x in vor}):
+            print("station missing from Vorarlberg feed:", *gone, file=sys.stderr)
+            src["vorarlberg"]["detail"] = "missing from feed: " + ", ".join(gone)
     except Exception as e:
         print("Vorarlberg stations failed:", e, file=sys.stderr)
+        fail("vorarlberg", e)
+        stations += carry("data/stations.json", "vorarlberg")
     by_uuid = {s["uuid"]: s for s in stations}
 
     os.makedirs("data", exist_ok=True)
@@ -496,6 +634,7 @@ def main(days):
                 merge(readings, k, iso[k], {f: maps[f] for f in FIELDS})
     except Exception as e:
         print("TAWES history failed:", e, file=sys.stderr)
+        src["tawes"]["detail"] = f"history failed: {e}"
     for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
         if st["id"].startswith("VOR-"):
             try:
@@ -508,10 +647,13 @@ def main(days):
                         merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items() if f in FIELDS})
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
+                src["vorarlberg"]["detail"] = "; ".join(filter(None, [src["vorarlberg"]["detail"], f"history failed: {st['id']} {e}"]))
     readings = prune(readings, now)
     with open("data/readings.json", "w") as fh:
         json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
 
+    for st in stations:
+        st["flags"] = check(st, hours, now)
     with open("data/stations.json", "w") as fh:
         json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
     fsrc = "failed"
@@ -525,12 +667,14 @@ def main(days):
         fc["generated"] = now.isoformat(timespec="minutes")
         with open("data/forecast.json", "w") as fh:
             json.dump(fc, fh)
-        fsrc = fc["source"]
+        fsrc = src["model"]["detail"] = fc["source"]
     except Exception as e:
         print("forecast failed:", e, file=sys.stderr)
+        fail("model", e)
         hourly["model"] = {"source": None, "issued": hourly["model"].get("issued")}
     hs_rise(hours, STATIONS)
     hourly["hours"] = prune_hours(hours, now)
+    hour_flags(hourly["hours"])
     with open("data/hourly.json", "w") as fh:
         json.dump(hourly, fh, sort_keys=True, separators=(",", ":"))
     ids = {s["region"].split()[0] for s in stations if s.get("region")}
@@ -544,9 +688,22 @@ def main(days):
             regions.update(parse_danger(get_json(url), ids))
         except Exception as e:
             print("avalanche bulletin failed:", name, e, file=sys.stderr)
+            fail("bulletins", "; ".join(filter(None, [src["bulletins"]["error"], f"{name}: {e}"])))
     if regions:
         with open("data/danger.json", "w") as fh:
             json.dump({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
+    health = {
+        "run": now.isoformat(timespec="minutes"),
+        "sources": src,
+        "flagged": [{"id": s["id"], "name": s["name"], "field": f, "reason": r} for s in stations for f, r in s["flags"].items()],
+        "offline": [
+            {"id": s["id"], "name": s["name"], "last": s["date"]}
+            for s in stations
+            if not s["date"] or datetime.fromisoformat(s["date"]) < now - timedelta(hours=24)
+        ],
+    }
+    with open("data/health.json", "w") as fh:
+        json.dump(health, fh)
     print(f"{len(stations)} stations, {len(readings)} reading slots, {len(hourly['hours'])} hours, forecast: {fsrc}")
 
 
@@ -782,6 +939,64 @@ def selftest():
         {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}},
         {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}},
     )
+    # plausibility: a clean station gets {}, each rule flags only its own field
+    now = datetime(2026, 11, 20, 12, 30, tzinfo=TZ)
+    ok = {"id": "SKAP1", "name": "Kapall Windstation", "lat": 47.14908, "lon": 10.24794, "hs": None, "lt": -4.0, "wg": 20.0, "wg_boe": 30.0, "wr": 200.0}
+    ok["date"] = "2026-11-20T12:10:00+01:00"
+    hk = lambda n, f, vals: {hkey(now - timedelta(hours=i)): {f: {"SKAP1": x}} for i, x in zip(range(n), vals)}  # newest first, from 12h
+    hh = lambda *maps: {k: {f: m for d in maps for f, m in d.get(k, {}).items()} for d in maps for k in d}
+    assert check(ok, {}, now) == {}
+    assert check({**ok, "lt": -50.0, "wr": 361.0, "wg": 260.0, "wg_boe": 270.0}, {}, now) == {
+        "lt": "out of range",
+        "wr": "out of range",
+        "wg": "out of range",
+        "wg_boe": "out of range",
+    }
+    hl = {"2026-11-20T12": {"hs": {"A": 900.0, "B": 50.0}, "rh": {"A": 101.0}}, "2026-11-20T11": {"lt": {"A": 1.0}, "flags": {"A": {"lt": "x"}}}}
+    hour_flags(hl)  # limits per hour; stale flags of an earlier run dropped
+    assert (hl["2026-11-20T12"]["flags"], "flags" in hl["2026-11-20T11"]) == ({"A": {"hs": "out of range", "rh": "out of range"}}, False)
+    sn = {**ok, "id": "SKAP2", "name": "Kapall Schneestation", "lat": 47.14749, "lon": 10.25878, "hs": 50.0, "wg": None, "wg_boe": None, "wr": None}
+    jh = lambda f, a, b: {"2026-11-20T12": {f: {"SKAP2": a}}, "2026-11-20T11": {f: {"SKAP2": b}}}
+    assert [check(sn, jh("hs", a, b), now).get("hs") for a, b in [(50, 19), (50, 20), (50, 66), (50, 65)]] == [
+        "jump",
+        None,
+        "jump",
+        None,
+    ]  # +31 / -16 jump, +30 / -15 allowed
+    assert [check(sn, jh("lt", a, b), now).get("lt") for a, b in [(-4, 4.5), (-4, 4), (5, -3.5)]] == ["jump", None, "jump"]
+    assert check(sn, {"2026-11-20T12": {"hs": {"SKAP2": 50}}, "2026-11-20T10": {"hs": {"SKAP2": 0}}}, now) == {}  # gap: no previous hour, no jump
+    assert check(ok, hk(6, "lt", [-4.0] * 6), now) == {"lt": "stuck"}
+    assert check(ok, hk(6, "lt", [-4.0] * 5 + [-4.1]), now) == {}  # 5 identical hours are not stuck
+    assert check(ok, hh(hk(6, "wr", [200.0] * 6), hk(6, "wg", [6.0] * 6)), now) == {"wr": "stuck"}
+    assert check(ok, hh(hk(6, "wr", [200.0] * 6), hk(6, "wg", [6.0] * 5 + [5.0])), now) == {}  # calm hour: a vane may rest
+    assert check({**ok, "wg_boe": 19.9}, {}, now) == {"wg_boe": "gust below mean"}
+    fz = hh(hk(3, "wg", [0.0] * 3), hk(3, "lt", [-1.0] * 3), hk(3, "rh", [96.0] * 3))
+    frozen = {"wg": "sensor frozen?", "wg_boe": "sensor frozen?", "wr": "sensor frozen?"}
+    assert (check({**ok, "wg": 0.0, "wg_boe": 0.0}, fz, now), check(ok, {**fz, "2026-11-20T10": {**fz["2026-11-20T10"], "rh": {"SKAP1": 95.0}}}, now)) == (
+        frozen,
+        {},
+    )
+    assert check({**ok, "date": "2026-11-20T12:41:00+01:00"}, {}, now) == {f: "time in future" for f in ("lt", "wg", "wg_boe", "wr")}
+    assert check({**ok, "date": "2026-11-20T12:40:00+01:00"}, {}, now) == {}
+    mv = lambda **kw: check({**ok, **kw}, {}, now).get("station")
+    assert (mv(lat=47.15808), mv(lat=47.15308), mv(name="X"), mv(id="NEW1")) == (
+        "location mismatch",
+        None,
+        "location mismatch",
+        "location mismatch",
+    )  # 1 km / 440 m north
+    # dates: Vienna ISO everywhere; TAWES staggered fields get their own time
+    assert station({**f, "properties": {**f["properties"], "date": "2026-11-20T09:20:00+00:00"}})["date"] == "2026-11-20T10:20:00+01:00"
+    assert (g["date"], g["dates"], a["date"], a["dates"]) == ("2026-11-19T07:00:00+01:00", {}, "2026-11-19T07:00:00+01:00", {"wg": "2026-11-19T06:50:00+01:00"})
+    tmp = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"selftest-stations-{os.getpid()}.json")
+    old = [{"id": "SKAP1", "date": "x"}, {"id": "TAWES-11110", "date": "2026-11-19T07:00:00+01:00", "lt": -2.0}, {"id": "VOR-ZURS1", "date": "y"}]
+    with open(tmp, "w") as fh:
+        json.dump({"stations": old}, fh)
+    try:  # carry-over: only the failed source's dicts, unchanged; missing file -> nothing
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert (carry(tmp, "tawes"), carry(tmp, "vorarlberg"), carry(tmp + ".missing", "tawes")) == ([old[1]], [old[2]], [])
+    finally:
+        os.remove(tmp)
     print("selftest ok")
 
 

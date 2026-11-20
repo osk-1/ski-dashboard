@@ -9,3 +9,4 @@ data/forecast.json
 data/readings.json
 data/danger.json
 data/hourly.json
+data/health.json
