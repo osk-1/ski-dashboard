@@ -1,32 +1,95 @@
 name: Record snow data
 
 on:
+  # Primary clock: an external scheduler POSTs workflow_dispatch at the exact Vienna times (see README).
+  # Backup clock: GitHub cron at off-peak minutes, both UTC offsets (CET/CEST). The gate makes extra triggers no-ops.
   schedule:
-    # GitHub cron is UTC only. 07:10/12:10/17:10 Vienna = 06/11/16 UTC in winter, 05/10/15 UTC in summer.
-    # Running both sets is harmless: fetch.py only fills slots that have passed and overwrites them idempotently.
-    - cron: "10 5,6,10,11,15,16 * * *"
+    - cron: "7,37 4-18 * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: Skip the time-window and freshness gate
+        type: boolean
+        default: false
+  push:
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
-concurrency: fetch
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  LIVE: https://osk-1.github.io/ski-dashboard/data
 
 jobs:
-  fetch:
+  deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python3 fetch.py --selftest
-      # --days 2 refills yesterday's slots too, in case a run was skipped
-      - run: python3 fetch.py --days 2
-      - name: Commit data
+      - name: Gate
+        id: gate
+        env:
+          FORCE: ${{ github.event_name == 'push' || inputs.force }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data
-          git diff --cached --quiet || git commit -m "Record snow data $(TZ=Europe/Vienna date '+%Y-%m-%d %H:%M')"
-          git push
+          run=true
+          if [ "$FORCE" != true ]; then
+            # Vienna 06:00-19:59 only, and only if the live data is older than 20 min (unreadable live data counts as stale)
+            hour=$(TZ=Europe/Vienna date +%H)
+            if [ "$hour" -lt 6 ] || [ "$hour" -ge 20 ]; then
+              run=false
+            elif curl -fsS --retry 3 "$LIVE/stations.json" -o /tmp/live.json 2>/dev/null; then
+              python3 - <<'PY' || run=false
+          import json, datetime as d, sys
+          age = d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(json.load(open("/tmp/live.json"))["updated"])
+          sys.exit(0 if age > d.timedelta(minutes=20) else 1)
+          PY
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "gate: run=$run"
+      - name: Download live data
+        # Bootstrap: while data/ is still committed in main, it is the seed and nothing is downloaded.
+        if: steps.gate.outputs.run == 'true' && hashFiles('data/readings.json') == ''
+        run: |
+          mkdir -p data
+          for f in stations forecast readings danger; do
+            curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json" -o "data/$f.json"
+          done
+      - name: Data-loss guard
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          python3 - <<'PY'
+          import json
+          r = json.load(open("data/readings.json"))
+          s = json.load(open("data/stations.json"))
+          assert isinstance(r, dict) and r, "readings.json empty"
+          assert s.get("stations"), "stations.json empty"
+          PY
+      - if: steps.gate.outputs.run == 'true'
+        run: python3 fetch.py --selftest
+      # --days 2 refills yesterday's slots too, in case a run was skipped
+      - if: steps.gate.outputs.run == 'true'
+        run: python3 fetch.py --days 2
+      - name: Assemble site
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          mkdir _site
+          cp -r index.html manifest.webmanifest icons data _site/
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - id: deployment
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/deploy-pages@v4
