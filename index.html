@@ -55,9 +55,9 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .leaflet-control-attribution a { color: var(--accent); }
 #map path[tabindex] { cursor: pointer; outline: none; }
 #map path[tabindex]:focus-visible { stroke: var(--accent); stroke-width: 4; }
-#map .wind-ic { pointer-events: none; outline: none; cursor: pointer; } /* the 44px box must not steal taps from neighbours: only its shapes are live */
-#map .wind-ic svg > * { pointer-events: auto; }
-#map .wind-ic:focus-visible circle { stroke: var(--accent); stroke-width: 3; }
+#map .wind-ic.leaflet-interactive { pointer-events: none; outline: none; cursor: pointer; } /* the 44px box must not steal taps from neighbours: only its shapes are live */
+#map .wind-ic.leaflet-interactive svg > * { pointer-events: auto; }
+#map .wind-ic.leaflet-interactive:focus-visible circle { stroke: var(--accent); stroke-width: 3; }
 #map .leaflet-tooltip.val { background: var(--panel); background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; box-shadow: none; padding: 1px 5px; font: 600 .9rem/1.2 var(--body); }
 #map.narrow .leaflet-tooltip.val { padding: 0 4px; font-size: .78rem; }
 #map .leaflet-tooltip.val::before { display: none; }
