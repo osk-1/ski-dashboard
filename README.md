@@ -35,7 +35,8 @@ Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`w
 | History | hourly archive `https://static.avalanche.report/weather_stations/<UTC YYYY-MM-DD_HH>-00_stations.geojson` |
 | St. Anton valley (TAWES 11311, snow + wind) and Galzig (TAWES 11110, wind/temperature only, no snow gauge) | GeoSphere Austria Data Hub `https://dataset.api.hub.geosphere.at/v1/station/{current,historical}/tawes-v1-10min` (CC BY 4.0); ids `TAWES-<id>`, m/s converted to km/h; snow history of the slots comes from the historical endpoint |
 | Avalanche danger | Euregio CAAMLv6 bulletin `https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json` |
-| Map relief | Esri World Hillshade tiles `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer` (loaded in the browser; the map falls back to flat if they fail) |
+| Map relief | Leaflet 1.9.4 (cdnjs) with Esri World Hillshade tiles `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer` (loaded in the browser; the map falls back to flat if they fail) |
+| Map place and peak coordinates (`PLACES`, `PEAKS` in `index.html`) | OpenStreetMap via Nominatim, checked 2026-11. St. Christoph uses its village node; Valluga is the OSM peak node; St. Anton, Pettneu and Ischgl keep their hand-entered values, because Nominatim only has municipality centroids for them (80–470 m away) |
 | Forecast | Open-Meteo (free tier). Falls back to MET Norway when Open-Meteo's shared daily quota is exhausted |
 
 ## Run locally
