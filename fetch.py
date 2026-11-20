@@ -113,10 +113,15 @@ def smet_history(text, slot_times):
             "wg_boe": ("VW_MAX", kmh), "wr": ("DW", num)}
     want = {t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"): t.strftime("%Y-%m-%dT%H") for t in slot_times}
     out = {}
+    def cell(r, c):  # one bad cell must not drop the row
+        try:
+            x = float(r[cols.index(c)])
+        except (IndexError, ValueError):
+            return None
+        return None if x == nodata else x
     for r in (l.split() for l in data.splitlines()):
         if r and r[0] in want:
-            out[want[r[0]]] = {k: fn(float(r[cols.index(c)])) for k, (c, fn) in conv.items()
-                               if c in cols and float(r[cols.index(c)]) != nodata}
+            out[want[r[0]]] = {k: fn(x) for k, (c, fn) in conv.items() if c in cols and (x := cell(r, c)) is not None}
     return out
 
 
@@ -386,6 +391,9 @@ def selftest():
     assert smet_history(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # no VW_MAX/DW columns; nodata per field
         "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0}, "2026-11-19T12": {"lt": -2.1},
         "2026-11-19T17": {"hs": 0.0, "lt": -3.1, "wg": 1.8}}
+    sm2 = smet.replace("2026-11-19T11:00:00Z 271.0 -999 -999", "2026-11-19T11:00:00Z 271.0 abc").replace("2026-11-19T16:00:00Z 270.0 -0.01 0.5", "2026-11-19T16:00:00Z 270.1 0.15")
+    assert smet_history(sm2, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # short row and non-numeric cell keep other fields
+        "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0}, "2026-11-19T12": {"lt": -2.1}, "2026-11-19T17": {"hs": 15.0, "lt": -3.0}}
     print("selftest ok")
 
 

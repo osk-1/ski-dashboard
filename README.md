@@ -27,7 +27,7 @@ Zürs Hexenboden, Lech/Arlberg, Lech Kriegerhorn, Langen Blasegg, Albona (snow) 
 Fields per station in `stations.json`: `id, uuid, name, region, type` (`snow`/`wind`), `lon, lat, alt`,
 `hs` (snow height cm), `n24` (new snow 24 h cm), `hsd24` (HS change 24 h cm), `lt` (air temp °C),
 `wg` (mean wind km/h), `wg_boe` (gust km/h), `wr` (wind direction °), `date`. Missing values are `null`.
-`readings.json` slots recorded before the temperature/wind fields were added lack `lt`/`wg`/`wg_boe`/`wr`, and the Vorarlberg/TAWES backfill reaches back only about 7 days, so older temperature and wind history is empty.
+`readings.json` slots recorded before the temperature/wind fields were added lack `lt`/`wg`/`wg_boe`/`wr`, and the Vorarlberg backfill reaches back only about 7 days; run `--days N` to backfill lt/wg/wg_boe/wr for Tirol and TAWES stations.
 
 ## Data sources
 
