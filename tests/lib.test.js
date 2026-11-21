@@ -176,6 +176,18 @@ test("riseOf: high-water mark of hs; jitter and settling add nothing, gaps keep 
   const f = mk(50, 70, 52); f["2026-11-20T11"].flags = { A: { hs: "x" } };
   assert.deepEqual(riseOf(f, "A", TK("10"), TK("12")), { v: 2, n: 2, of: 3 });
 });
+test("riseOf: 1 h window seeds from the boundary hour (now-h), so one reading gives its rise", () => {
+  const h = { "2026-11-20T13": { hs: { A: 50 } }, "2026-11-20T14": { hs: { A: 52 } } };
+  assert.deepEqual(riseOf(h, "A", TK("14"), TK("14")), { v: 2, n: 1, of: 1 });
+});
+test("riseOf: boundary hour missing or flagged falls back to the first in-window value", () => {
+  const h = { "2026-11-20T14": { hs: { A: 52 } }, "2026-11-20T15": { hs: { A: 55 } } };
+  assert.deepEqual(riseOf(h, "A", TK("14"), TK("15")), { v: 3, n: 2, of: 2 }); // no 13: mark starts at 52
+  h["2026-11-20T13"] = { hs: { A: 50 }, flags: { A: { hs: "x" } } };
+  assert.deepEqual(riseOf(h, "A", TK("14"), TK("15")), { v: 3, n: 2, of: 2 }); // flagged 13 ignored
+  h["2026-11-20T13"] = { hs: { A: 60 } };
+  assert.deepEqual(riseOf(h, "A", TK("14"), TK("15")), { v: 0, n: 2, of: 2 }); // unflagged 13 seeds: 52 and 55 are below 60
+});
 test("strongestGust: ties go to the first station, flagged skipped, empty null", () => {
   assert.deepEqual(strongestGust(HR, [{ id: "A" }, { id: "B" }], TK("13"), 4), { y: 40, id: "A", k: "2026-11-20T10", wr: 90 });
   assert.equal(strongestGust(HR, [{ id: "B" }, { id: "A" }], TK("13"), 4).id, "B");
@@ -185,8 +197,8 @@ test("strongestGust: ties go to the first station, flagged skipped, empty null",
 test("past window is (now-h, now]: h hours, not h+1", () => {
   const h = { "2026-11-20T12": { hs: { A: 10 } }, "2026-11-20T13": { hs: { A: 11 } }, "2026-11-20T14": { hs: { A: 15 }, wg_boe: { A: 9 } }, "2026-11-20T11": { wg_boe: { A: 50 } } };
   const r = bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 1);
-  assert.equal(r.mid.snowLast, 0); // 1 h window holds one reading: no rise
-  assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 2).mid.snowLast, 4); // 13, 14 only; 12 is outside
+  assert.equal(r.mid.snowLast, 4); // 1 h window = hour 14 only; boundary 13 (hs 11) seeds the mark, 15 - 11 = 4
+  assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 2).mid.snowLast, 5); // 13, 14; boundary 12 (hs 10): 11 - 10 + 15 - 11 = 5
   assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 3).mid.snowLast, 5);
   assert.equal(strongestGust(h, [{ id: "A" }], TK("14"), 3).y, 9); // 11 h is outside (14-3, 14]
 });

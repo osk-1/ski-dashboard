@@ -99,8 +99,9 @@ const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d /
 // hours of `field` in [from, to] that have a value and are not flagged for this station; hr (HS rise) is clamped at 0 like risePts
 const okPts = (hours, field, id, from, to) => slice(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
 const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length, of: slice(hours, field, id, from, to).length }; }; // of = hours in the window
-// new snow = HS rise above the running maximum (high-water mark) of the unflagged hs values: jitter and settling add nothing, gaps keep the mark
-const riseOf = (hours, id, from, to) => { let m = null, v = 0; const pts = okPts(hours, "hs", id, from, to); for (const p of pts) { if (m != null && p.y > m) v += p.y - m; m = m == null ? p.y : Math.max(m, p.y); } return { v, n: pts.length, of: slice(hours, "hs", id, from, to).length }; };
+// new snow = HS rise above the running maximum (high-water mark) of the unflagged hs values: jitter and settling add nothing, gaps keep the mark.
+// The mark starts at the hour before the window's first hour (the boundary), so the rise from there counts; without a usable boundary it starts at the first in-window value.
+const riseOf = (hours, id, from, to) => { const first = Math.ceil(from / H) * H, b = okPts(hours, "hs", id, first - H, first - H)[0]; let m = b ? b.y : null, v = 0; const pts = okPts(hours, "hs", id, from, to); for (const p of pts) { if (m != null && p.y > m) v += p.y - m; m = m == null ? p.y : Math.max(m, p.y); } return { v, n: pts.length, of: slice(hours, "hs", id, from, to).length }; };
 const extremeOf = (hours, field, id, from, to, max) => okPts(hours, field, id, from, to).reduce((a, p) => !a || (max ? p.y > a.y : p.y < a.y) ? p : a, null);
 const r1 = v => v == null ? null : Math.round(v * 10) / 10;
 // per band: n = stations with any data; each metric is the median over the stations that have it (null when none), with its own station count (…N)
