@@ -1,5 +1,5 @@
 /* global Chart */
-// Snow depth chart (#40): persisted window switch, forecast zone, gaps, 1 h numbers, removed History / 5-day charts.
+// Snow depth chart (#40): shared window switch (the sheet), forecast zone, gaps, removed History / 5-day charts.
 import { expect, test } from "@playwright/test";
 import { open, VIEWPORTS } from "./helpers.mjs";
 
@@ -8,10 +8,10 @@ const sets = (page) => page.evaluate(() => Chart.getChart("snow").data.datasets.
 for (const vp of VIEWPORTS) {
   for (const scheme of ["light", "dark"]) {
     test(`snow depth chart at ${vp.name}px, ${scheme}`, async ({ browser }) => {
-      const { page, context, problems } = await open(browser, vp, scheme, { storage: { sel: "SKAP2" } });
+      const { page, context, problems } = await open(browser, vp, scheme, { storage: { sel: "SKAP2", tab: "snow" } });
       await expect(page.locator("#updated")).toContainText("stations");
       await expect(page.locator("#hist, #fc")).toHaveCount(0);
-      await expect(page.locator("#snowWin button[data-h='72']")).toHaveAttribute("aria-pressed", "true"); // default
+      await expect(page.locator("#snowWin button[data-h='24']")).toHaveAttribute("aria-pressed", "true"); // default
       await expect(page.locator("#snowNote")).toContainText("Open-Meteo"); // sd/sm keep their own source after the fixture's MET Norway fallback run
       await expect(page.locator("#snowNote")).not.toContainText("MET Norway");
       await expect.poll(() => page.evaluate(() => !!Chart.getChart("snow"))).toBe(true);
@@ -36,7 +36,7 @@ for (const vp of VIEWPORTS) {
       // window persists over reload
       await page.reload();
       await expect(page.locator("#snowWin button[data-h='168']")).toHaveAttribute("aria-pressed", "true");
-      await expect(page.locator("#condWin button[data-h='24']")).toHaveAttribute("aria-pressed", "true"); // own switch per chart
+      await expect(page.locator("#condWin button[data-h='168']")).toHaveAttribute("aria-pressed", "true"); // one switch for all charts
 
       await page.selectOption("#stnSel", "SKAP2");
       await page.click("#snowWin button[data-h='24']");
@@ -44,14 +44,6 @@ for (const vp of VIEWPORTS) {
       await page.waitForTimeout(300);
       await page.locator("#snowPanel").screenshot({ path: `test-results/screens/snow-24h-${vp.name}-${scheme}.png` });
 
-      await page.click("#snowWin button[data-h='1']");
-      await expect(page.locator("#snowNow")).toContainText("vs 1 h ago");
-      await expect(page.locator("#snowNow")).toContainText("Next hour: snowfall");
-      await expect(page.locator("#snowNow")).toContainText("Next hour: depth");
-      await expect(page.locator("#snowBox")).toBeHidden();
-      await page.locator("#snowPanel").screenshot({ path: `test-results/screens/snow-1h-${vp.name}-${scheme}.png` });
-      await page.selectOption("#stnSel", "TAWES-11311");
-      await expect(page.locator("#snowNow")).toContainText("no forecast");
 
       expect(problems).toEqual([]);
       await context.close();

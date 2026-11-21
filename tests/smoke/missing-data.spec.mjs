@@ -13,7 +13,7 @@ for (const vp of VIEWPORTS) {
     await expect(page.locator("#updated")).toContainText("stations");
     await expect(page.locator("#updated")).toContainText("hourly data couldn't be refreshed");
     for (const id of ["cond", "snow", "wind"]) await expect(page.locator(`#${id}Note`)).toContainText("No hourly data");
-    await expect(page.locator("#snowPanel")).toBeVisible();
+    await expect(page.locator("#condPanel")).toBeVisible(); // the sheet starts on Conditions
     await expect(page.locator("#rows tr[data-id]").first()).toBeVisible(); // the rest of the page works
     expect(problems.filter((p) => !p.includes("404"))).toEqual([]); // the browser logs the 404 itself; no page error
     await context.close();

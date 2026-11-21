@@ -98,7 +98,7 @@ let map, groups, dangerLayer, dangerOk, lc, lp, fitBounds, fitZ;
 const landmarks = [];
 const mapDiv = document.getElementById("map");
 const legendOpen = () => document.getElementById("legend").classList.contains("open");
-const setLegend = on => { document.getElementById("legend").classList.toggle("open", on); for (const b of document.querySelectorAll("#legend button, #fsLegend")) b.setAttribute("aria-expanded", on); }; // the "?" button and the full-screen one share the state
+const setLegend = on => { document.getElementById("legend").classList.toggle("open", on); for (const b of document.querySelectorAll("#legend button")) b.setAttribute("aria-expanded", on); }; 
 document.getElementById("legend").addEventListener("click", e => { if (e.target.closest("button")) setLegend(!legendOpen()); });
 const phone = () => matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)").matches;
 // Map layer selector: station categories (a data array, so more can be added) + the avalanche-danger overlay.
@@ -167,16 +167,17 @@ function nsShow() {
     nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .55, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
     () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); renderMap(); } });
 }
-// Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
-let fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
-const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs || sheetOn()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
-// Bottom-sheet prototype (?sheet=1 on, ?sheet=0 off, remembered): on phones the map fills the screen and the page scrolls over it as a sheet.
-// The panel moves to the top of <body> so the sheet (.wrap) can stack above it; the full-screen mode stays for the non-sheet layout.
-let sheetPref = false;
-try { const q = new URLSearchParams(location.search).get("sheet"); if (q != null) localStorage.setItem("sheet", q); sheetPref = localStorage.getItem("sheet") === "1"; } catch {}
-const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), sheetOn = () => sheetPref && sheetMq.matches;
-if (sheetPref) { document.documentElement.classList.add("sheet"); document.body.prepend(fsPanel); }
-sheetMq.addEventListener("change", () => { if (map) fsRefresh(); });
+// Bottom sheet (phones, sheetMq): the map fills the screen and the page scrolls over it as a sheet.
+// On a phone the panel moves to the top of <body> so the sheet (.wrap) can stack above it; the card follows (above the sheet).
+const mapPanel = document.getElementById("mapPanel"), card = document.getElementById("stationCard"), panelHome = mapPanel.parentElement;
+const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), sheetOn = () => sheetMq.matches;
+const refreshMap = () => { map.invalidateSize(); if (sheetOn()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+const placeSheet = () => {
+  document.documentElement.classList.toggle("sheet", sheetOn());
+  if (sheetOn()) { document.body.prepend(mapPanel); document.body.append(card); } else { panelHome.prepend(mapPanel); mapPanel.append(card); }
+};
+placeSheet();
+sheetMq.addEventListener("change", () => { placeSheet(); if (map) refreshMap(); });
 if (sheetOn()) { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; } // one shared window; notes behind "About this chart"
 // sheet: one chart at a time (tabs); a tab whose panel the station lacks (no snow / wind) falls back to Conditions
 let tab = "cond";
@@ -192,33 +193,10 @@ document.getElementById("chartTabs").addEventListener("click", e => {
   showTab(); const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[tab](s); // drawn while hidden: re-lay out at its real width
 });
 const sheetPeek = () => sheetOn() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
-// keyboard focus stays in the panel: everything beside it (and beside each ancestor) is inert while in full screen
-const fsInert = on => { for (let e = fsPanel; e.parentElement && e !== document.body; e = e.parentElement) for (const x of e.parentElement.children) if (x !== e) x.inert = on; };
-function enterFs() {
-  if (fs) return;
-  fsInert(true); fs = true; fsY = scrollY; fsPanel.classList.add("fs"); document.documentElement.classList.add("fs-lock"); fsBtn.setAttribute("aria-pressed", "true");
-  fsPanel.requestFullscreen?.()?.catch(() => {}); // refused: stay in CSS mode
-  history.pushState({ fs: 1 }, ""); fsPushed = true; fsRefresh();
-}
-function exitFs() {
-  if (!fs) return;
-  closeCard(false);
-  fsInert(false); fs = false; fsPanel.classList.remove("fs"); document.documentElement.classList.remove("fs-lock"); fsBtn.setAttribute("aria-pressed", "false");
-  setLegend(false);
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  if (fsPushed) { fsPushed = false; if (history.state?.fs) { fsBack = true; history.back(); } } // popstate already consumed the entry when it started the exit
-  scrollTo(0, fsY); fsRefresh(); fsBtn.focus({ preventScroll: true }); // plain focus() scrolls the button into view after the restore
-  requestAnimationFrame(() => scrollTo(0, fsY)); // history.back() / the fullscreen exit can move the scroll once the layout settles
-}
-document.getElementById("fsExit").onclick = exitFs;
-document.getElementById("fsLegend").onclick = () => setLegend(!legendOpen());
-addEventListener("keydown", e => { if (e.key === "Escape" && (fs || sheetOn())) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card (CSS mode; in API full screen the browser takes Escape and fullscreenchange exits)
-addEventListener("popstate", () => { if (fsBack) { fsBack = false; return; } fsPushed = false; exitFs(); }); // fsBack: the pop our own history.back() causes must not close a session entered since
-addEventListener("orientationchange", () => { if (map) fsRefresh(); });
-document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
-// Station card (full screen and the sheet): a tap on a station opens it instead of selecting; Open charts leaves full screen (raises the sheet) and selects.
-const card = document.getElementById("stationCard"), scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
-if (sheetPref) document.body.append(card); // above the sheet, which stacks above the map panel
+addEventListener("keydown", e => { if (e.key === "Escape" && sheetOn() && card.classList.contains("open")) closeCard(); });
+addEventListener("orientationchange", () => { if (map) refreshMap(); });
+// Station card: a tap on a station opens it instead of selecting; Open charts selects and raises the sheet.
+const scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
 
 function openCard(id) {
   const s = state.stations.find(x => x.id === id); if (!s) return;
@@ -240,12 +218,12 @@ function openCard(id) {
 function closeCard(refocus = true) {
   if (!card.classList.contains("open")) return;
   card.classList.remove("open"); const id = cardId; cardId = undefined; renderMap();
-  if (refocus) (document.querySelector(`#map [data-sid="${CSS.escape(id)}"]`) || fsBtn).focus();
+  if (refocus) document.querySelector(`#map [data-sid="${CSS.escape(id)}"]`)?.focus();
 }
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
-  const id = cardId; closeCard(false); exitFs(); select(id); // closeCard clears cardId (exitFs does nothing in the sheet)
-  // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
+  const id = cardId; closeCard(false); select(id); // closeCard clears cardId
+  // instant ("auto"): honours prefers-reduced-motion
   requestAnimationFrame(() => requestAnimationFrame(() => (sheetOn() ? chartsec : document.getElementById("condTitle")).scrollIntoView({ block: "start", behavior: "auto" })));
 };
 function initMap() {
@@ -266,12 +244,6 @@ function initMap() {
     b.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3"/></svg>';
     b.onclick = reset; L.DomEvent.disableClickPropagation(d); return d; } });
   new Reset({ position: "topleft" }).addTo(map);
-  const Full = L.Control.extend({ onAdd() {
-    const d = L.DomUtil.create("div", "leaflet-bar"), b = fsBtn = L.DomUtil.create("button", "", d);
-    b.type = "button"; b.title = "Full screen"; b.setAttribute("aria-label", "Full screen"); b.setAttribute("aria-pressed", "false");
-    b.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9"/></svg>';
-    b.onclick = () => fs ? exitFs() : enterFs(); L.DomEvent.disableClickPropagation(d); return d; } });
-  new Full({ position: "topleft" }).addTo(map);
   const Layers = L.Control.extend({ onAdd() {
     const d = lc = L.DomUtil.create("div", "lay"), bar = L.DomUtil.create("div", "leaflet-bar", d), b = L.DomUtil.create("button", "", bar), p = lp = L.DomUtil.create("div", "lp", d);
     b.type = "button"; b.title = "Map layers"; b.setAttribute("aria-label", "Map layers"); b.setAttribute("aria-controls", "lp");
@@ -340,7 +312,7 @@ function renderMap() {
   mapDiv.classList.toggle("narrow", narrow);
   const area = r => (r[2] - r[0]) * (r[3] - r[1]);
   const overlap = (r, q) => Math.max(0, Math.min(r[2], q[2]) - Math.max(r[0], q[0])) * Math.max(0, Math.min(r[3], q[3]) - Math.max(r[1], q[1]));
-  const mb = mapDiv.getBoundingClientRect(), tl = mapDiv.querySelector(".leaflet-top.leaflet-left").getBoundingClientRect(), ctl = [[0, 0, tl.right - mb.left, tl.bottom - mb.top]], cb = lc.getBoundingClientRect(); // zoom/reset/full-screen column and the layer button/panel, weighted 10x: nothing should sit under them
+  const mb = mapDiv.getBoundingClientRect(), tl = mapDiv.querySelector(".leaflet-top.leaflet-left").getBoundingClientRect(), ctl = [[0, 0, tl.right - mb.left, tl.bottom - mb.top]], cb = lc.getBoundingClientRect(); // zoom/reset column and the layer button/panel, weighted 10x: nothing should sit under them
   ctl.push([cb.left - mb.left, cb.top - mb.top, cb.right - mb.left, cb.bottom - mb.top]);
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * ctl.reduce((c, q) => c + overlap(r, q), 0) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
   const S = shown(), byId = Object.fromEntries(S.map(s => [s.id, s]));
@@ -380,7 +352,7 @@ function renderMap() {
     taken.splice(taken.indexOf(lm.box), 1); lm.box = place(lm); taken.push(lm.box);
   }
   const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : pick(n.lead.id); }; // overlapping pads: nearest group or station wins
-  const pick = id => fs || sheetOn() ? openCard(id) : select(id);
+  const pick = id => sheetOn() ? openCard(id) : select(id);
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
   for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {

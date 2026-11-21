@@ -16,6 +16,8 @@ Live page: https://osk-1.github.io/ski-dashboard/
    - `danger.json`: `source`, `generated` and `regions`, the avalanche danger per region (`AT-07-07`, `AT-07-10`, `AT-07-11`, and from the Vorarlberg bulletin `AT-08-03-01`, `AT-08-03-02`, `AT-08-04`): `ratings` (`level` 0–5, `bound` above/below/null, `elevation`, `period`), `problems` (`type`, `elevation`, `aspects`), `name`, `published`, `valid_start`/`valid_end`. Outside the season it holds the last bulletin of the previous winter; the page marks that as not current. The Vorarlberg bulletin 404s until its first bulletin of the season (usually early December); a bulletin that fails keeps its regions from the last run
 2. GitHub Pages serves `index.html`, which reads `stations.json`, `hourly.json`, `danger.json`, `regions.json` and `health.json` (not `forecast.json` or `readings.json`).
 
+   Layout: on phones (width up to 820 px, or a landscape phone up to 500 px high) the bottom sheet is the only layout: the map fills the screen and the page scrolls over it as a sheet (glance, summary, tabbed charts with one shared 24 h / 72 h / 7 d switch); tapping a station opens its card, Open charts raises the sheet. Wider screens get the desktop page. There is no full-screen mode and no `?sheet` switch.
+
 To record now: Actions tab → "Record snow data" → Run workflow, tick `force`.
 
 ### Setup (repo owner)

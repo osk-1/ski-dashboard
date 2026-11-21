@@ -1,4 +1,4 @@
-/* global document, MouseEvent, map, fitZ */
+/* global document, MouseEvent, map, fitZ, select */
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
@@ -20,10 +20,8 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     const { page, context, problems } = await open(browser, vp, scheme, { fixtures: { stations: stale() }, storage: { layers: JSON.stringify({ on: { snow: true, wind: true } }) } });
     const card = page.locator("#stationCard");
     await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
-    await tap(page, "SKAP2"); // outside full screen: selects, no card
-    await expect(page.locator("#stnSel")).toHaveValue("SKAP2"); await expect(card).toBeHidden();
-    await page.getByRole("button", { name: "Full screen", exact: true }).click(); await page.waitForTimeout(400);
 
+    await page.evaluate(() => select("SKAP2")); // the selection the card previews must not change
     await tap(page, "VOR-ZURS1"); // wind stale, HS fresh, 1920 m
     await expect(card).toBeVisible(); await expect(page.locator("#scAlt")).toHaveText("1920 m");
     const title = await page.locator("#scTitle").textContent();
@@ -43,7 +41,7 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await tap(page, "VOR-ZURS1"); await expect(page.locator("#scTitle")).toHaveText(title);
 
     await page.keyboard.press("Escape"); // first Escape: card only
-    await expect(card).toBeHidden(); await expect(page.locator("#mapPanel")).toHaveClass(/fs/);
+    await expect(card).toBeHidden();
     await expect(page.locator('#map [data-sid="VOR-ZURS1"]')).toBeFocused();
     await tap(page, "VOR-ZURS1"); await expect(card).toBeVisible();
     await page.locator("#scClose").click(); await expect(card).toBeHidden();
@@ -53,11 +51,9 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await tap(page, "VOR-ZURS1"); await expect(card).toBeVisible(); await page.locator("#scClose").click(); // preview only: selection and charts stay on SKAP2
     await expect(page.locator("#stnSel")).toHaveValue("SKAP2");
     expect(await page.evaluate(() => localStorage.getItem("sel"))).toBe("SKAP2");
-    await expect(page.locator("#condTitle")).toContainText("Kapall Schneestation");
     await tap(page, "VOR-ZURS1"); await page.getByRole("button", { name: "Open charts" }).click();
-    await expect(page.locator("#mapPanel")).not.toHaveClass(/fs/);
     await expect(page.locator("#stnSel")).toHaveValue("VOR-ZURS1");
-    await expect.poll(async () => (await page.locator("#condTitle").boundingBox()).y, { timeout: 4000 }).toBeLessThan(40); // scrolled to the top of the charts (smooth scroll settles)
+    await expect.poll(async () => (await page.locator(".chartsec").boundingBox()).y, { timeout: 4000 }).toBeLessThan(40); // scrolled to the top of the charts (smooth scroll settles)
     expect(problems).toEqual([]);
     await context.close();
   });

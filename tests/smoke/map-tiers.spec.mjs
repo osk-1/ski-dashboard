@@ -1,4 +1,4 @@
-/* global map, fitZ, state, renderMap, select, document -- page globals inside page.evaluate */
+/* global map, fitZ, state, renderMap, openCard, document -- page globals inside page.evaluate */
 import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
 
@@ -42,13 +42,13 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#map .leaflet-tooltip.val")).toHaveCount(0);
       await expect(page.locator("#map .pl.pk")).toHaveCount(1);
 
-      // a merged marker zooms in; the selected station is never merged and keeps name + value at tier 0
+      // a merged marker zooms in; the previewed station is never merged and keeps name + value at tier 0
       const z = await page.evaluate(() => map.getZoom());
       await page.locator('#map [aria-label*=" stations:"]').first().focus();
       await page.keyboard.press("Enter");
       await expect.poll(() => page.evaluate(() => map.getZoom())).toBeGreaterThan(z); // setView animates
       await zoomBy(page, 0);
-      await page.evaluate(() => select("SKAP2")); // Kapall snow station, merged with its wind station while unselected
+      await page.evaluate(() => openCard("SKAP2")); // Kapall snow station, merged with its wind station until its card opens (the sheet has no selected highlight)
       await expect(page.locator("#map .leaflet-tooltip.val.sel")).toContainText("Kapall Schneestation");
       await expect(page.locator("#map .leaflet-tooltip.val.sel b")).toContainText("cm");
       expect(problems).toEqual([]);

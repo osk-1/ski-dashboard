@@ -35,10 +35,12 @@ for (const vp of VIEWPORTS) {
 
       // select a station (the select works at every width) and check both charts draw
       await page.selectOption("#stnSel", "SKAP2"); // a station with snow depth; wind-only stations hide the snow panel
-      for (const id of ["cond", "snow"]) {
+      for (const id of ["cond", "snow"]) { // one chart at a time: the tab shows it
+        await page.click(`#chartTabs [data-tab="${id}"]`);
         await expect.poll(() => page.evaluate((i) => !!Chart.getChart(i), id)).toBe(true);
         await expect(page.locator(`#${id}`)).toBeVisible();
       }
+      await page.click('#chartTabs [data-tab="cond"]');
       // conditions chart: a Tirol station (snow surface, HS rise) and a gauge station with model hours after "now"
       for (const id of ["SKAP2", "VOR-ZURS1"]) {
         await page.selectOption("#stnSel", id);
@@ -47,15 +49,6 @@ for (const vp of VIEWPORTS) {
         await expect(page.locator("#condNote")).toContainText(id === "SKAP2" ? "refroze" : "Overnight min");
         if (id === "SKAP2") await page.locator("#condBox").screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}-cond-skap2.png`) });
       }
-      await page.click("#condWin button[data-h='1']");
-      await expect(page.locator("#condNow")).toContainText("°C");
-      await expect(page.locator("#condBox")).toBeHidden();
-      // 1 h times: gauge hours are the HH:00 sample; a Tirol hour shows the station's own time when it is that hour, else only "hour of"
-      await expect(page.locator("#condNow .stat").first()).toContainText("20 Nov, 16:00");
-      await page.selectOption("#stnSel", "SKAP2"); // newest hourly lt at 10:00, station time 15:40
-      await expect(page.locator("#condNow .stat").first()).toContainText("hour of 20 Nov, 10:00");
-      await expect(page.locator("#condNow .stat").first().locator("s.bad")).toHaveCount(1);
-      await page.locator("#condNow").screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}-cond-1h.png`) });
       await page.click("#condWin button[data-h='24']");
       await expect.poll(() => page.evaluate(() => !!Chart.getChart("cond"))).toBe(true);
       await page.waitForTimeout(500); // chart animation
