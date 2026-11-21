@@ -124,7 +124,7 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
 .panel.fs .legend > button { display: none; }
 .panel.fs .legend.open .wx { display: block; flex-basis: 100%; }
 #stationCard { display: none; }
-.glance, .ctabs, .note > summary { display: none; } /* sheet only (below); elsewhere the notes stay open with no summary */
+.glance, .ctabs, .note > summary, .read { display: none; } /* sheet only (below); elsewhere the notes stay open with no summary */
 .panel.fs #stationCard, html.sheet #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
 .panel.fs #stationCard.open, html.sheet #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
 @media (prefers-reduced-motion: reduce) { .panel.fs #stationCard, .panel.fs #stationCard.open, html.sheet #stationCard, html.sheet #stationCard.open { transition: none; } }
@@ -148,6 +148,8 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
   html.sheet .chartsec[data-tab="cond"] :is(#snowPanel, #windPanel), html.sheet .chartsec[data-tab="snow"] :is(#condPanel, #windPanel), html.sheet .chartsec[data-tab="wind"] :is(#condPanel, #snowPanel) { display: none; }
   html.sheet .seg[data-chart] button:not([data-h="24"], [data-h="72"], [data-h="168"]) { display: none; } /* one shared 24 h / 72 h / 7 d switch */
   html.sheet .note > summary { display: flex; color: var(--muted); font-size: .8rem; min-height: 44px; } html.sheet .note[open] > summary { margin-bottom: 0; }
+  html.sheet .read { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 2px 12px; min-height: 4.1em; margin-bottom: 4px; font-size: .8rem; line-height: 1.35; font-variant-numeric: tabular-nums; } /* reserved height: dragging must not make the chart jump */
+  html.sheet .read b { flex-basis: 100%; font-weight: 600; } html.sheet .read span { white-space: nowrap; } html.sheet .read i { display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 1px; }
   html.sheet h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } /* the page name stays for screen readers only */
   html.sheet .wrap::before { content: ""; justify-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin-bottom: -8px; }
 }
@@ -276,6 +278,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
       <div class="seg" id="condWin" data-chart="cond" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
       <label class="tog"><input type="checkbox" id="condRh"> Humidity</label>
     </div>
+    <div class="read" id="condRead"></div>
     <div class="chartbox" id="condBox"><canvas id="cond" role="img" aria-label="Conditions chart"></canvas></div>
     <div class="strip now" id="condNow" hidden></div>
     <details class="note" open><summary>About this chart</summary><p class="src" id="condNote"></p></details>
@@ -285,6 +288,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     <div class="ctl">
       <div class="seg" id="snowWin" data-chart="snow" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
     </div>
+    <div class="read" id="snowRead"></div>
     <div class="chartbox" id="snowBox"><canvas id="snow" role="img" aria-label="Snow depth chart"></canvas></div>
     <div class="strip now" id="snowNow" hidden></div>
     <details class="note" open><summary>About this chart</summary><p class="src" id="snowNote"></p></details>
@@ -294,6 +298,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     <div class="ctl">
       <div class="seg" id="windWin" data-chart="wind" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
     </div>
+    <div class="read" id="windRead"></div>
     <div class="chartbox" id="windBox"><canvas id="wind" role="img" aria-label="Wind chart"></canvas></div>
     <div class="strip now" id="windNow" hidden></div>
     <details class="note" open><summary>About this chart</summary><p class="src" id="windNote"></p></details>
