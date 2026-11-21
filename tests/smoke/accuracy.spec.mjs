@@ -1,4 +1,4 @@
-/* global Chart, map */
+/* global Chart, map, fitZ */
 // Accuracy acceptance cases (#42): modified copies of the fixtures, routed per test; the shared fixtures stay as they are.
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
@@ -71,7 +71,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('#rows tr[data-id="KSIN2"] .why')).toHaveText("no recent data (last 09:35)");
 
       // rimed anemometer: suspect on the map, excluded from the summary with the reason
-      await page.evaluate(() => map.setView([47.1099, 10.2776], map.getMaxZoom(), { animate: false })); // the fitted map shows no value labels and merges the Gampberg pair (#39): zoom in until it splits
+      await page.evaluate(() => map.setView([47.1099, 10.2776], fitZ + 4, { animate: false })); // the fitted map shows no value labels (#39), and the long suspect text needs room: zoom in
       await expect(page.locator(".leaflet-tooltip.val", { hasText: "Gampberg Windstation" })).toContainText("suspect: sensor frozen?");
       await expect(page.locator("#summary")).toContainText("Gampberg Windstation (wind, gusts, wind direction: suspect: sensor frozen?)");
       await expect(page.locator("#summary")).toContainText("2 excluded"); // Ulmerhütte HS offline, Kappl Sinsenergampen stale

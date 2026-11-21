@@ -235,11 +235,11 @@ function renderMap() {
   ctl.push([cb.left - mb.left, cb.top - mb.top, cb.right - mb.left, cb.bottom - mb.top]);
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * ctl.reduce((c, q) => c + overlap(r, q), 0) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
   const S = shown(), byId = Object.fromEntries(S.map(s => [s.id, s]));
-  const grp = groupByPixel(S.map(s => ({ id: s.id, ...at(s.lat, s.lon), rank: s.type === "wind" ? -2 : s.hs ?? -1 })), 28, state.selected).map(ids => {
+  const grp = groupByPixel(S.map(s => ({ id: s.id, ...at(s.lat, s.lon), rank: s.type === "wind" ? -2 : s.hs ?? -1 })), tier === 2 ? 0 : 28, state.selected).map(ids => {
     const mem = ids.map(i => byId[i]), g = mem.length > 1 ? describeGroup(mem) : { lead: mem[0], wind: null, count: 1 };
     const ll = [mem.reduce((a, m) => a + m.lat, 0) / mem.length, mem.reduce((a, m) => a + m.lon, 0) / mem.length], { x, y } = at(...ll);
     const arr = g.wind && arrowOn(g.wind) ? g.wind : arrowVis(g.lead) ? g.lead : null; // merged: the wind member's arrow, else the lead's own
-    return { mem, ...g, merged: mem.length > 1, ll, x, y, arr, own: [[x - 14, y - 14, x + 14, y + 14], ...arr ? [[x - 10, y - 36, x + 10, y - 12]] : []] };
+    return { mem, ...g, merged: mem.length > 1, ll, x, y, arr, own: [[x - 11, y - 11, x + 11, y + 11], ...arr ? [[x - 10, y - 36, x + 10, y - 12]] : []] };
   });
   const merged = new Set(grp.filter(g => g.merged).flatMap(g => g.mem.map(m => m.id)));
   const all = placed().map(s => goodOnly(s, Date.now())), loose = all.filter(s => arrowVis(s) && !merged.has(s.id)); // arrows of snow dots that are not in a merged group (or whose dot is hidden)
@@ -248,16 +248,27 @@ function renderMap() {
   const taken = [...stationBoxes];
   const place = lm => { // label box beside its symbol with the least overlap; peaks always label to the right
     const { x, y } = at(lm.lat, lm.lon), len = lm.name.length * 7;
-    const sides = [["", [x - 6, y - 9, x + 14 + len, y + 9]], ["l", [x - 14 - len, y - 9, x + 6, y + 9]], ["d", [x - 6, y - 5, x + 6 + len, y + 22]], ["u", [x - 6, y - 22, x + 6 + len, y + 5]]];
-    const [side, box] = (lm.pk ? sides.slice(0, 1) : sides).reduce((best, c) => costAgainst(taken, c[1]) < costAgainst(taken, best[1]) ? c : best);
-    lm.marker.getElement().firstChild.className = lm.marker.getElement().firstChild.className.replace(/ (l|d|u)$/, "") + (side && " " + side);
+    // right (""), left ("l"), below ("d"), above ("u"); crowded villages also try raised/lowered and nudged-out variants (inline offsets)
+    const sides = [["", 0, 0, [x - 6, y - 9, x + 14 + len, y + 9]], ["l", 0, 0, [x - 14 - len, y - 9, x + 6, y + 9]], ["d", 0, 0, [x - 6, y - 5, x + 6 + len, y + 22]], ["u", 0, 0, [x - 6, y - 22, x + 6 + len, y + 5]]];
+    if (!lm.pk) for (const dx of [0, 18]) for (const dy of [-18, 18, -36, 36]) sides.push(["", dx, dy, [x - 6 + dx, y - 9 + dy, x + 14 + len + dx, y + 9 + dy]], ["l", dx, dy, [x - 14 - len - dx, y - 9 + dy, x + 6 - dx, y + 9 + dy]]);
+    const [side, dx, dy, box] = (lm.pk ? sides.slice(0, 1) : sides).reduce((best, c) => costAgainst(taken, c[3]) < costAgainst(taken, best[3]) ? c : best), el = lm.marker.getElement().firstChild;
+    el.className = el.className.replace(/ (l|d|u)$/, "") + (side && " " + side);
+    el.style.left = el.style.right = el.style.top = ""; // only the nudged variants set inline offsets
+    if (dx || dy) { el.style[side ? "right" : "left"] = -4 + dx + "px"; el.style.top = -9 + dy + "px"; }
     return box;
   };
   const peakOn = lm => lay.on.peaks && (tier === 2 || (tier === 1 ? lm.major : lm.name.startsWith("Valluga"))); // tier 0: Valluga only; tier 1: the major peaks; tier 2: all
   for (const lm of landmarks) if (!lm.pk) { const { x, y } = at(lm.lat, lm.lon); taken.push([x - 6, y - 9, x + 6, y + 9]); } // village symbols first, so no label lands on a neighbour's marker
   for (const lm of landmarks) {
     if (lm.pk) map[peakOn(lm) ? "addLayer" : "removeLayer"](lm.marker);
-    if (!lm.pk || (peakOn(lm) && lm.name.startsWith("Valluga"))) taken.push(place(lm)); // villages and the overview peak claim their spot first
+    if (!lm.pk || (peakOn(lm) && lm.name.startsWith("Valluga"))) {
+      const box = place(lm); // villages and the overview peak claim their spot first
+      lm.box = box;
+      if (lm.pk && tier > 0 && costAgainst([], box) > 0) map.removeLayer(lm.marker); else taken.push(box); // only at the overview must Valluga stay, even under a control
+    }
+  }
+  for (const lm of landmarks) if (!lm.pk) { // second pass: every village re-picks its side now that the others' labels are known
+    taken.splice(taken.indexOf(lm.box), 1); lm.box = place(lm); taken.push(lm.box);
   }
   const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : select(n.lead.id); }; // overlapping pads: nearest group or station wins
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));

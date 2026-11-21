@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
 
 const zoomBy = async (page, d) => { await page.evaluate((d) => { map.setZoom(fitZ + d, { animate: false }); }, d); await page.waitForTimeout(300); }; // zoomend re-lays out synchronously; removed tooltips fade out for 200 ms
-const visibleBoxes = (page, sel) => page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => { const r = e.getBoundingClientRect(), m = document.getElementById("map").getBoundingClientRect(); return { t: e.textContent, l: r.left, r: r.right, top: r.top, b: r.bottom, in: r.width > 0 && r.left >= m.left && r.right <= m.right && r.top >= m.top && r.bottom <= m.bottom }; }).filter((b) => b.in), sel);
-const noOverlaps = (boxes) => { for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) { const a = boxes[i], b = boxes[j]; expect(a.l < b.r && b.l < a.r && a.top < b.b && b.top < a.b, `${a.t} overlaps ${b.t}`).toBe(false); } };
+const visibleBoxes = (page, sel) => page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => { const r = e.classList.contains("pl") ? (() => { const g = document.createRange(); g.selectNodeContents(e.lastChild); return g.getBoundingClientRect(); })() : e.getBoundingClientRect(), // village: the name only, its symbol may sit on a station
+       m = document.getElementById("map").getBoundingClientRect(); return { pl: e.classList.contains("pl"), t: e.textContent || e.getAttribute("aria-label"), l: r.left, r: r.right, top: r.top, b: r.bottom, in: r.width > 0 && r.left >= m.left && r.right <= m.right && r.top >= m.top && r.bottom <= m.bottom }; }).filter((b) => b.in), sel);
+const noOverlaps = (boxes, labelsOnly = false) => { for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) { const a = boxes[i], b = boxes[j]; if (labelsOnly && !a.pl && !b.pl) continue; const e = 2; // px: strokes and anti-aliasing
+  expect(a.l + e < b.r && b.l + e < a.r && a.top + e < b.b && b.top + e < a.b, `${a.t} overlaps ${b.t}`).toBe(false); } };
 
 for (const vp of VIEWPORTS) {
   for (const scheme of ["light", "dark"]) {
@@ -19,7 +21,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#map .pl.pk")).toHaveCount(1);
       await expect(page.locator("#map .pl.pk")).toContainText("Valluga");
       expect(await page.locator('#map [aria-label*=" stations:"]').count()).toBeGreaterThanOrEqual(1);
-      noOverlaps(await visibleBoxes(page, "#map .pl"));
+      noOverlaps(await visibleBoxes(page, "#map .pl, #map path[data-sid], #map .wind-ic:not([data-sid])"), true); // village labels vs everything; dots vs dots are merged by the 28 px rule
       await shot(page, "map-tier0", vp, scheme);
 
       // tier 1: values, more peaks, no station names, nothing overlaps
