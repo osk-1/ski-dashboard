@@ -153,7 +153,7 @@ function nsShow() {
     () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); renderMap(); } });
 }
 // Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
-let fsRestore = 0, fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
+let fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
 const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
 function enterFs() {
   if (fs) return;
@@ -168,12 +168,9 @@ function exitFs() {
   document.getElementById("legend").classList.remove("open"); document.getElementById("fsLegend").setAttribute("aria-expanded", "false");
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (fsPushed) { fsPushed = false; if (history.state?.fs) { fsBack = true; history.back(); } } // popstate already consumed the entry when it started the exit
-  fsRefresh(); fsBtn.focus({ preventScroll: true }); // plain focus() scrolls the button into view after the restore
-  // The page behind is still re-laying out (rotation, history.back(), fullscreen exit), so the browser clamps an early scrollTo to the then-shorter page: keep restoring for 350 ms.
-  const id = ++fsRestore, t0 = performance.now(), back = () => { if (id !== fsRestore || fs) return; if (Math.abs(scrollY - fsY) > 1) scrollTo(0, fsY); if (performance.now() - t0 < 350) requestAnimationFrame(back); };
-  back();
+  scrollTo(0, fsY); fsRefresh(); fsBtn.focus({ preventScroll: true }); // plain focus() scrolls the button into view after the restore
+  requestAnimationFrame(() => scrollTo(0, fsY)); // history.back() / the fullscreen exit can move the scroll once the layout settles
 }
-for (const ev of ["wheel", "touchstart", "keydown", "mousedown"]) addEventListener(ev, () => fsRestore++, { passive: true, capture: true }); // the user took over the scroll
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = e => e.currentTarget.setAttribute("aria-expanded", document.getElementById("legend").classList.toggle("open"));
 addEventListener("keydown", e => { if (e.key === "Escape" && fs) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card
@@ -203,7 +200,6 @@ function closeCard(refocus = true) {
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
   const id = cardId; exitFs(); select(id); // exitFs closes the card (cardId cleared)
-  fsRestore++; // its scroll to the charts must not be undone by the restore loop
   // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
   requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("condTitle").scrollIntoView({ block: "start", behavior: "auto" })));
 };
