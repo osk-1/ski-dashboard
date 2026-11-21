@@ -482,6 +482,7 @@ function chartDefaults() {
   Chart.defaults.color = css("--muted");
   Chart.defaults.borderColor = css("--line");
   Chart.defaults.font.family = css("--body");
+  if (sheetOn()) { Chart.register(cursor); Chart.defaults.events = ["mousemove", "click", "touchstart", "touchmove"]; Object.assign(Chart.defaults.plugins.tooltip, { enabled: false, external: readout }); } // no mouseout / touchend: the cursor stays
   // "nearest" on the x axis, but only points with a value (a null bar or gap would otherwise win and show no tooltip) and never the direction arrows
   Chart.Interaction.modes.nearestX = (c, e) => {
     const all = []; let best = Infinity;
@@ -490,6 +491,23 @@ function chartDefaults() {
   };
 }
 
+// sheet: values in a fixed line above the chart (#<id>Read) instead of a tooltip under the finger; a tap or a drag moves a cursor that stays; it starts at the latest measurement
+const readout = ({ chart: c, tooltip: t }) => {
+  const el = document.getElementById(c.canvas.id + "Read"); if (!el || !t.opacity) return; // nothing under the finger: keep the last values
+  const col = lc => lc.backgroundColor && lc.backgroundColor !== "transparent" ? lc.backgroundColor : lc.borderColor;
+  el.innerHTML = `<b>${esc(t.title.join(" "))}</b>` + t.body.map((b, i) => `<span><i style="background:${esc(col(t.labelColors[i]))}"></i>${esc(b.lines.join(" "))}</span>`).join("") + t.afterBody.map(x => `<span>${esc(x)}</span>`).join("");
+};
+const cursor = { id: "cursor",
+  afterRender(c) { // first draw at a real size: put the cursor on the latest measured hour (else now)
+    if (!sheetOn() || c.$cur || !c.width) return; c.$cur = 1;
+    const now = anchorMs(state.hourly?.hours || {}, Date.now()), last = Math.max(...c.data.datasets.filter(d => d.kind === "measured" && !d.noTip).flatMap(d => d.data.filter(p => p.y != null && p.x <= now).map(p => p.x)));
+    const px = Math.max(c.chartArea.left, Math.min(c.chartArea.right, c.scales.x.getPixelForValue(isFinite(last) ? last : now))), items = Chart.Interaction.modes.nearestX(c, { x: px });
+    if (items.length) requestAnimationFrame(() => { if (!c.ctx) return; c.setActiveElements(items); c.tooltip.setActiveElements(items, { x: px, y: c.chartArea.top }); c.update(); });
+  },
+  afterDatasetsDraw(c) {
+    const a = sheetOn() && c.tooltip?.getActiveElements()[0]; if (!a) return;
+    const { ctx, chartArea: r } = c; ctx.save(); ctx.strokeStyle = css("--fg"); ctx.globalAlpha = .5; ctx.beginPath(); ctx.moveTo(a.element.x, r.top); ctx.lineTo(a.element.x, r.bottom); ctx.stroke(); ctx.restore();
+  } };
 function renderCharts() {
   const s = state.stations.find(x => x.id === state.selected);
   if (!s || typeof Chart === "undefined") return;
@@ -530,6 +548,8 @@ const measLine = (hours, id, pts, f, label, unit, c, o = {}) => ({ label, unit, 
 const bins = (pts, h, extra) => h >= 72 ? binSum(pts, h >= 168 ? 24 : 3, extra) : pts;
 const binTitle = r => (r.x1 - r.x0 > 3 * 3600e3 ? new Date(r.x0).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "Europe/Vienna" }) + ", day total" : `${fmtSlot(r.x0)}–${fmtHour(r.x1 + 3600e3)}`)
   + (r.n < r.of ? ` · ${r.n} of ${r.of} h with data` : "");
+// bars in their own strip under the lines (stacked left axes, one shared time axis) instead of a second axis on the right
+const TOP = { stack: "s", stackWeight: 2.5 }, strip = text => ({ position: "left", stack: "s", stackWeight: 1, offset: true, beginAtZero: true, grid: { display: false }, ticks: { maxTicksLimit: 3 }, title: { display: true, text } });
 const barSet = (label, unit, data, o) => ({ type: "bar", label, unit, data, order: 2, barPercentage: 1, categoryPercentage: .8, grouped: data[0]?.x0 == null, ...o }); // bins: measured and model bars of the current bin overlap at its middle instead of halving every bar
 const statHtml = (t, name, small, bad) => `<div class="stat"><b>${bad ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${small}</small></div>`;
 // each model field has its own source and issue time (hourly.json model.fields: a MET Norway fallback run does not provide sd/sm); old data without fields: the latest run's
@@ -600,8 +620,8 @@ function renderCond(s) {
         tooltip: tip({ label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.sm != null ? ` (snow ${c.raw.sm} cm)` : ""}${c.raw.fl ? ` · suspect: ${c.raw.fl}` : ""}` }) },
       scales: {
         x: timeAxis(from, to, condH),
-        y: { title: { display: true, text: "°C" }, grid: zero, grace: "5%", suggestedMin: 0, suggestedMax: 0 },
-        ...(nn(pr.data) || nn(pm.data) ? { yP: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: gauge ? "mm" : "cm / mm" } } } : {}),
+        ...(nn(pr.data) || nn(pm.data) ? { yP: strip(gauge ? "mm" : "cm / mm") } : {}), // before y: the first axis of a stack is drawn lowest
+        y: { title: { display: true, text: "°C" }, grid: zero, grace: "5%", suggestedMin: 0, suggestedMax: 0, ...(nn(pr.data) || nn(pm.data) ? TOP : {}) },
         ...(rh && nn(rh.data) ? { yH: { position: "right", min: 0, max: 100, grid: { display: false }, title: { display: true, text: "%" } } } : {}) } },
   });
   // last complete night / day from all of hourly.json, not just the window
@@ -647,8 +667,8 @@ function renderSnow(s) {
     type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(nn(sd.data) || nn(sm.data), "sd", "sm"))],
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearestX", intersect: false },
       plugins: { legend, tooltip: tip() },
-      scales: { x: timeAxis(from, to, h), y: { beginAtZero: true, grace: "5%", title: { display: true, text: "cm" } },
-        ...(nn(rise.data) || nn(sm.data) ? { yR: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: h >= 168 ? "cm / day" : h >= 72 ? "cm / 3 h" : "cm / h" } } } : {}) } },
+      scales: { x: timeAxis(from, to, h), ...(nn(rise.data) || nn(sm.data) ? { yR: strip(h >= 168 ? "cm / day" : h >= 72 ? "cm / 3 h" : "cm / h") } : {}),
+        y: { beginAtZero: true, grace: "5%", title: { display: true, text: "cm" }, ...(nn(rise.data) || nn(sm.data) ? TOP : {}) } } },
   });
   el("snowNote").textContent = [
     nn(hsL.data) ? `Line: measured snow height (${srcOf(id)}); bars: ${h >= 168 ? "daily" : h >= 72 ? "3-hourly" : "hourly"} rise, never negative.` : "No snow height measured in this window.",
@@ -709,12 +729,12 @@ function renderWind(s) {
 // touch: a tap shows the nearest point's tooltip and it stays until a tap elsewhere (outside ~20 px of a point, or off the canvas). Listeners on the canvas survive chart re-creation.
 const tipAt = new WeakMap(), clearTip = c => { tipAt.delete(c); if (!c.tooltip.getActiveElements().length) return; c.setActiveElements([]); c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update(); };
 for (const cid of ["cond", "snow", "wind"]) document.getElementById(cid).addEventListener("click", e => {
-  const c = charts[cid]; if (!c || !e.pointerType || e.pointerType === "mouse") return;
+  const c = charts[cid]; if (!c || !e.pointerType || e.pointerType === "mouse" || sheetOn()) return; // the sheet keeps its cursor
   const r = c.canvas.getBoundingClientRect(), p = { native: true, x: e.clientX - r.left, y: e.clientY - r.top }; // native: marks x/y as canvas coordinates for Chart.js
   const was = tipAt.get(c); // tapping the point already shown toggles it off
   setTimeout(() => { tipAt.set(c, c.tooltip.getActiveElements().map(a => a.datasetIndex + ":" + a.index).join()); if (c === charts[cid] && was && was === tipAt.get(c) && c.tooltip.opacity) return clearTip(c); if (c === charts[cid] && !c.getElementsAtEventForMode(p, "nearestX", { intersect: false }).some(m => Math.abs(m.element.x - p.x) <= 20 && !m.element.skip)) clearTip(c); }, 50); // after Chart.js's own (rAF-throttled) event handling
 });
-document.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse") for (const cid in charts) if (charts[cid] && !charts[cid].canvas.contains(e.target)) clearTip(charts[cid]); });
+document.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse" && !sheetOn()) for (const cid in charts) if (charts[cid] && !charts[cid].canvas.contains(e.target)) clearTip(charts[cid]); });
 
 // banner when the last successful refresh is too old (health.json run time, else stations.json updated)
 function renderBanner() {

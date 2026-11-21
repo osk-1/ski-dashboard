@@ -46,6 +46,12 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await expect(page.locator("#condPanel")).toBeVisible(); await expect(page.locator("#snowPanel")).toBeHidden(); await expect(page.locator("#windPanel")).toBeHidden();
     await expect(page.locator("#condNote")).toBeHidden(); await expect(page.locator("#condPanel .note summary")).toBeVisible();
     await expect(page.locator("#condWin button:visible")).toHaveCount(3);
+    const read = page.locator("#condRead");
+    await expect(read).toContainText("Air: "); await expect(read.locator("b")).toHaveText("20 Nov, 10:00"); // starts at the latest measured hour (the fixture station stops at 10:00)
+    const box = await page.locator("#cond").boundingBox();
+    await page.touchscreen.tap(box.x + box.width * .3, box.y + box.height / 2);
+    await expect(read.locator("b")).not.toHaveText("20 Nov, 10:00"); const t = await read.locator("b").textContent();
+    await page.waitForTimeout(300); await expect(read.locator("b")).toHaveText(t); // stays after the finger lifts
     await shot(page, "sheet-charts", vp, scheme);
     await page.locator("#chartTabs button[data-tab='snow']").click();
     await expect(page.locator("#snowPanel")).toBeVisible(); await expect(page.locator("#condPanel")).toBeHidden();
