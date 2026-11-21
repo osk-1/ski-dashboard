@@ -62,4 +62,22 @@ const refreshStale = (lastIso, now) => {
   return last < keyMs((h >= 20 ? k.slice(0, 10) : shift(k.slice(0, 10), -1)) + "T19");
 };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-if (typeof module !== "undefined") module.exports = { STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale };
+// Map zoom tiers (#39): 0 = overview, 1 = values, 2 = names + everything
+const tierOf = (z, fitZ) => z < fitZ + 1 ? 0 : z < fitZ + 2 ? 1 : 2;
+// Greedy pixel grouping: highest rank seeds a group and absorbs unassigned points within px; `keep` stays alone. pts: [{id, x, y, rank}]
+const groupByPixel = (pts, px = 28, keep = null) => {
+  const left = [...pts].sort((a, b) => b.rank - a.rank || (a.id < b.id ? -1 : 1)), out = [];
+  while (left.length) {
+    const seed = left.shift(), ids = [seed.id];
+    if (seed.id !== keep) for (let i = 0; i < left.length;) left[i].id !== keep && Math.hypot(left[i].x - seed.x, left[i].y - seed.y) <= px ? ids.push(left.splice(i, 1)[0].id) : i++;
+    out.push(ids);
+  }
+  return out;
+};
+// lead = deepest non-wind member; one snow-type + one wind-only member = a dot with the wind arrow on it
+const describeGroup = members => {
+  const snowy = members.filter(m => m.type !== "wind"), wind = members.filter(m => m.type === "wind");
+  const lead = snowy.reduce((a, b) => (b.hs ?? -1) > (a.hs ?? -1) ? b : a, snowy[0] || members[0]);
+  return snowy.length === 1 && wind.length === 1 ? { lead, wind: wind[0], count: 1 } : { lead, wind: null, count: members.length };
+};
+if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale };

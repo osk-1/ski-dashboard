@@ -68,7 +68,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .leaflet-tooltip.val.leaflet-interactive { cursor: pointer; }
 #map .val .nm { display: none; margin-right: 5px; font-weight: 400; color: var(--muted); }
 #map .val.sel { z-index: 1000; }
-#map .val.sel .nm, #map.names .val .nm { display: inline; }
+#map .val.sel .nm, #map .val.wn .nm { display: inline; }
 #map .wind-ic { background: none; border: 0; }
 #map .lay { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #map .lay .leaflet-bar { margin: 0; }
@@ -92,8 +92,9 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .pl.l { left: auto; right: -4px; flex-direction: row-reverse; }
 #map .pl.d { flex-direction: column; align-items: flex-start; gap: 2px; top: -5px; }
 #map .pl.u { flex-direction: column-reverse; align-items: flex-start; gap: 2px; top: auto; bottom: -5px; }
+#map .gb-ic { pointer-events: none; }
+#map .gb { display: block; box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--fg); color: var(--panel); border: 1px solid var(--panel); font: 700 .7rem/14px var(--body); text-align: center; }
 #map .pl.pk { color: var(--muted); font-weight: 400; }
-#map:not(.zin) .pl.pk { display: none; } /* peaks are dense: only once zoomed in */
 #map .pl.pk i { width: 12px; height: 11px; background: var(--muted); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
 .legend svg { vertical-align: middle; }

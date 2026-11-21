@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale } = require("../lib.js");
+const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -104,4 +104,26 @@ test("refreshStale: day window 75 min, night window from 19:00 of that evening",
   assert.equal(refreshStale("2026-11-19T19:30:00+01:00", at("2026-11-21T02")), true); // the night before's run
   assert.equal(refreshStale("2026-11-20T19:30:00+01:00", at("2026-11-21T07")), true); // 07:00: day rule again
   assert.equal(refreshStale(undefined, at("2026-11-21T07")), true);
+});
+
+test("tierOf: thresholds relative to fitZ", () => {
+  assert.deepEqual([12, 12.75, 13, 13.75, 14, 16].map(z => tierOf(z, 12)), [0, 0, 1, 1, 2, 2]);
+  assert.equal(tierOf(11, 12), 0);
+});
+test("groupByPixel: within / outside 28 px, chain, keep, empty", () => {
+  const P = (id, x, y, rank = 0) => ({ id, x, y, rank });
+  assert.deepEqual(groupByPixel([P("a", 0, 0), P("b", 28, 0)]), [["a", "b"]]);
+  assert.deepEqual(groupByPixel([P("a", 0, 0), P("b", 29, 0)]), [["a"], ["b"]]);
+  // chain: c is 40 px from the seed a, so it is not pulled in through b
+  assert.deepEqual(groupByPixel([P("a", 0, 0, 3), P("b", 20, 0, 2), P("c", 40, 0, 1)]), [["a", "b"], ["c"]]);
+  assert.deepEqual(groupByPixel([P("a", 0, 0, 3), P("k", 5, 0, 2), P("b", 10, 0, 1)], 28, "k"), [["a", "b"], ["k"]]);
+  assert.deepEqual(groupByPixel([P("k", 0, 0, 9), P("a", 5, 0, 1)], 28, "k"), [["k"], ["a"]]);
+  assert.deepEqual(groupByPixel([]), []);
+});
+test("describeGroup: snow+wind, two snow, snow+wind+snow, single", () => {
+  const S = (id, type, hs) => ({ id, type, hs });
+  assert.deepEqual(describeGroup([S("w", "wind"), S("s", "snow", 40)]), { lead: S("s", "snow", 40), wind: S("w", "wind"), count: 1 });
+  assert.deepEqual(describeGroup([S("a", "snow", 10), S("b", "snow", 90)]), { lead: S("b", "snow", 90), wind: null, count: 2 });
+  assert.deepEqual(describeGroup([S("a", "snow", 10), S("w", "wind"), S("b", "snow", 90)]), { lead: S("b", "snow", 90), wind: null, count: 3 });
+  assert.deepEqual(describeGroup([S("w", "wind")]), { lead: S("w", "wind"), wind: null, count: 1 });
 });

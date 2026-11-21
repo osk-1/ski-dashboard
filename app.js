@@ -1,10 +1,10 @@
 const BOUNDS = { lon0: 10.09, lon1: 10.43, lat0: 47.003, lat1: 47.240 }; // west: east edge of the Sonnenkopf ski area; north: 2 km south of Warth
 const PLACES = [["St. Anton", 10.2636, 47.1295], ["St. Christoph", 10.2135, 47.1277], ["Pettneu", 10.3428, 47.1453],
   ["Ischgl", 10.2921, 47.0125]];
-const PEAKS = [["Valluga 2811", 10.2125, 47.1575], ["Scheibler 2978", 10.2220, 47.0587], ["Augstenbergkopf 2881", 10.2402, 47.0775],
-  ["Maroikopf 2529", 10.1632, 47.1136],["Kaltenberg 2896", 10.1383, 47.0865], ["Trittkopf 2720", 10.1935, 47.1553], ["Rüfispitze 2636", 10.1846, 47.1919],
-  ["Madlochspitze 2545", 10.1226, 47.1792], ["Erzbergspitze 2536", 10.1421, 47.1531], ["Wildebene 2570", 10.1803, 47.0958], ["Saumspitze 3039", 10.2696, 47.0509], ["Kreuzjochspitze 2919", 10.3061, 47.0793],
-  ["Hochkarspitze 2836", 10.3076, 47.1108], ["Erlijoch 2431", 10.2179, 47.1756], ["Roßfallscharte 2732", 10.2887, 47.0945]];
+const PEAKS = [["Valluga 2811", 10.2125, 47.1575, true], ["Scheibler 2978", 10.2220, 47.0587, true], ["Augstenbergkopf 2881", 10.2402, 47.0775, true],
+  ["Maroikopf 2529", 10.1632, 47.1136, false],["Kaltenberg 2896", 10.1383, 47.0865, false], ["Trittkopf 2720", 10.1935, 47.1553, false], ["Rüfispitze 2636", 10.1846, 47.1919, false],
+  ["Madlochspitze 2545", 10.1226, 47.1792, false], ["Erzbergspitze 2536", 10.1421, 47.1531, false], ["Wildebene 2570", 10.1803, 47.0958, false], ["Saumspitze 3039", 10.2696, 47.0509, true], ["Kreuzjochspitze 2919", 10.3061, 47.0793, true],
+  ["Hochkarspitze 2836", 10.3076, 47.1108, true], ["Erlijoch 2431", 10.2179, 47.1756, false], ["Roßfallscharte 2732", 10.2887, 47.0945, false]];
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
 const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
@@ -74,7 +74,7 @@ function renderDanger() {
   }).join("");
 }
 
-let map, groups, dangerLayer, dangerOk, lc, lp, fitBounds, fitZ, fitCenter;
+let map, groups, dangerLayer, dangerOk, lc, lp, fitBounds, fitZ;
 const landmarks = [];
 const mapDiv = document.getElementById("map");
 document.getElementById("legend").addEventListener("click", e => { const b = e.target.closest("button"); if (b) b.setAttribute("aria-expanded", e.currentTarget.classList.toggle("open")); });
@@ -153,7 +153,7 @@ function initMap() {
   const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
   fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
   const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40] }); }; // extra left padding keeps the view clear of the zoom/reset controls
-  const fit = () => { reset(); fitZ = map.getZoom(); fitCenter = map.project(map.getCenter(), fitZ); map.setMinZoom(fitZ - 1); };
+  const fit = () => { reset(); fitZ = map.getZoom(); map.setMinZoom(fitZ - 1); };
   fit();
   let timer;
   map.on("resize", () => { names(); clearTimeout(timer); timer = setTimeout(() => { fit(); renderMap(); }, 150); });
@@ -190,9 +190,9 @@ function initMap() {
     return d; } });
   map.createPane("places").style.zIndex = 350; // under the station dots
   map.createPane("hit").style.zIndex = 390; // tap pads: under every dot, so a pad never covers a neighbouring dot
-  for (const [list, cls] of [[PLACES, "v"], [PEAKS, "pk"]]) for (const [name, lon, lat] of list) {
+  for (const [list, cls] of [[PLACES, "v"], [PEAKS, "pk"]]) for (const [name, lon, lat, major] of list) {
     const marker = L.marker([lat, lon], { pane: "places", interactive: false, keyboard: false, icon: L.divIcon({ className: "", iconSize: [0, 0], html: `<span class="pl ${cls}"><i></i>${esc(name)}</span>` }) }).addTo(map);
-    landmarks.push({ name, lat, lon, marker, pk: cls === "pk" });
+    landmarks.push({ name, lat, lon, marker, pk: cls === "pk", major });
   }
   map.createPane("danger").style.zIndex = 330; // above the relief tiles, under places and stations
   map.createPane("newsnow").style.zIndex = 340; // above danger, under places; own pane, so the dark-mode tile filter skips it
@@ -202,8 +202,8 @@ function initMap() {
     const r = state.danger.regions[f.properties.id], c = DGC[Math.max(0, ...(r?.ratings.map(x => x.level) || []))], old = !r || new Date(r.valid_end) < new Date();
     return { color: c, weight: 1, opacity: old ? .35 : .8, fillColor: c, fillOpacity: old ? .12 : .4 }; } });
   new Layers({ position: "topright" }).addTo(map);
-  const names = () => { mapDiv.classList.toggle("names", !phone() && map.getZoom() >= fitZ + 1.5); mapDiv.classList.toggle("zin", map.getZoom() >= fitZ + 1); };
-  map.on("zoomend", names); names(); map.on("click", nsClick);
+  const names = () => { for (let i = 0; i < 3; i++) mapDiv.classList.toggle("t" + i, tierOf(map.getZoom(), fitZ) === i); }; // t0 / t1 / t2
+  map.on("zoomend", () => { names(); renderMap(); }); names(); map.on("click", nsClick);
 }
 
 function renderMap() {
@@ -224,9 +224,9 @@ function renderMap() {
   if (lay.on.newsnow && !nsErr) nsCfg ? nsShow() : nsBusy || nsLoad();
   if (lay.on.newsnow && nsCfg && !nsErr) lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>New snow (${esc(nsRange().timeRange)} h):</span>` +
     nsCfg.thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi)}<span class="cm"> cm</span></span>`).join("") + `<span class="ph">cm</span></span>`);
-  // Label layout at the fitted view, in map pixels. Landmark labels move beside/above/below their symbol to clear station
-  // dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
-  const size = map.getSize(), origin = fitCenter.subtract(size.divideBy(2)), at = (lat, lon) => map.project([lat, lon], fitZ).subtract(origin);
+  // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge, labels follow the zoom tier (#39).
+  // Landmark labels move beside/above/below their symbol to clear dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
+  const size = map.getSize(), at = (lat, lon) => map.latLngToContainerPoint([lat, lon]), tier = tierOf(map.getZoom(), fitZ);
   const narrow = size.x < 480, charW = narrow ? 7 : 8, tipH = narrow ? 20 : 24;
   mapDiv.classList.toggle("narrow", narrow);
   const area = r => (r[2] - r[0]) * (r[3] - r[1]);
@@ -234,25 +234,38 @@ function renderMap() {
   const ctl = [[0, 0, 50, 112]], mb = mapDiv.getBoundingClientRect(), cb = lc.getBoundingClientRect(); // zoom + reset column and the layer button/panel, weighted 10x: nothing should sit under them
   ctl.push([cb.left - mb.left, cb.top - mb.top, cb.right - mb.left, cb.bottom - mb.top]);
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * ctl.reduce((c, q) => c + overlap(r, q), 0) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
-  const stationBoxes = [];
-  const all = placed().map(s => goodOnly(s, Date.now()));
-  for (const s of all) { const { x, y } = at(s.lat, s.lon); if (vis(s)) stationBoxes.push([x - 14, y - 14, x + 14, y + 14]); if (arrowVis(s)) stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
+  const S = shown(), byId = Object.fromEntries(S.map(s => [s.id, s]));
+  const grp = groupByPixel(S.map(s => ({ id: s.id, ...at(s.lat, s.lon), rank: s.type === "wind" ? -2 : s.hs ?? -1 })), 28, state.selected).map(ids => {
+    const mem = ids.map(i => byId[i]), g = mem.length > 1 ? describeGroup(mem) : { lead: mem[0], wind: null, count: 1 };
+    const ll = [mem.reduce((a, m) => a + m.lat, 0) / mem.length, mem.reduce((a, m) => a + m.lon, 0) / mem.length], { x, y } = at(...ll);
+    const arr = g.wind && arrowOn(g.wind) ? g.wind : arrowVis(g.lead) ? g.lead : null; // merged: the wind member's arrow, else the lead's own
+    return { mem, ...g, merged: mem.length > 1, ll, x, y, arr, own: [[x - 14, y - 14, x + 14, y + 14], ...arr ? [[x - 10, y - 36, x + 10, y - 12]] : []] };
+  });
+  const merged = new Set(grp.filter(g => g.merged).flatMap(g => g.mem.map(m => m.id)));
+  const all = placed().map(s => goodOnly(s, Date.now())), loose = all.filter(s => arrowVis(s) && !merged.has(s.id)); // arrows of snow dots that are not in a merged group (or whose dot is hidden)
+  const stationBoxes = grp.flatMap(g => g.own);
+  for (const s of loose) { const { x, y } = at(s.lat, s.lon); if (!vis(s)) stationBoxes.push([x - 10, y - 36, x + 10, y - 12]); }
   const taken = [...stationBoxes];
-  for (const lm of landmarks) {
-    if (lm.pk) { map[lay.on.peaks ? "addLayer" : "removeLayer"](lm.marker); if (!lay.on.peaks) continue; }
+  const place = lm => { // label box beside its symbol with the least overlap; peaks always label to the right
     const { x, y } = at(lm.lat, lm.lon), len = lm.name.length * 7;
     const sides = [["", [x - 6, y - 9, x + 14 + len, y + 9]], ["l", [x - 14 - len, y - 9, x + 6, y + 9]], ["d", [x - 6, y - 5, x + 6 + len, y + 22]], ["u", [x - 6, y - 22, x + 6 + len, y + 5]]];
-    // peaks always label to the right of the symbol
     const [side, box] = (lm.pk ? sides.slice(0, 1) : sides).reduce((best, c) => costAgainst(taken, c[1]) < costAgainst(taken, best[1]) ? c : best);
     lm.marker.getElement().firstChild.className = lm.marker.getElement().firstChild.className.replace(/ (l|d|u)$/, "") + (side && " " + side);
-    taken.push(box);
+    return box;
+  };
+  const peakOn = lm => lay.on.peaks && (tier === 2 || (tier === 1 ? lm.major : lm.name.startsWith("Valluga"))); // tier 0: Valluga only; tier 1: the major peaks; tier 2: all
+  for (const lm of landmarks) if (!lm.pk) { const { x, y } = at(lm.lat, lm.lon); taken.push([x - 6, y - 9, x + 6, y + 9]); } // village symbols first, so no label lands on a neighbour's marker
+  for (const lm of landmarks) {
+    if (lm.pk) map[peakOn(lm) ? "addLayer" : "removeLayer"](lm.marker);
+    if (!lm.pk || (peakOn(lm) && lm.name.startsWith("Valluga"))) taken.push(place(lm)); // villages and the overview peak claim their spot first
   }
+  const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : select(n.lead.id); }; // overlapping pads: nearest group or station wins
+  const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
-  for (const s of shown().sort((a, b) => b.lat - a.lat)) {
-    const sel = s.id === state.selected, wo = s.type === "wind", wx = s.type === "weather", wind = hasWind(s), grp = groups[catOf(s)];
+  for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {
+    const s = g.lead, { x, y, merged: mg } = g, sel = s.id === state.selected, wo = s.type === "wind", wx = s.type === "weather", wind = hasWind(s), lg2 = groups[catOf(s)];
     const bad = s.bad[wo ? "wg" : wx ? "lt" : "hs"];
     const val = bad ? badText(bad) : wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : wx ? (s.lt == null ? "–" : s.lt + " °C") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
-    const { x, y } = at(s.lat, s.lon);
     // direction + offset: beside the dot first, then the four diagonals, then below and above
     const spots = [["right", [10, 0]], ["left", [-10, 0]], ["right", [8, 17]], ["right", [8, -17]], ["left", [-8, 17]], ["left", [-8, -17]], ["bottom", [0, 12]], ["top", [0, -12]]];
     const tipBox = (dir, [dx, dy], w) => {
@@ -261,26 +274,38 @@ function renderMap() {
       return [left, top, left + w, top + tipH];
     };
     const bestSpot = w => spots.map(([dir, off]) => ({ dir, off, box: tipBox(dir, off, w) }))
-      .reduce((best, c) => (c.cost = costAgainst(taken, c.box)) < best.cost ? c : best, { cost: Infinity });
-    const valW = 14 + charW * val.length;
-    const spot = bestSpot(sel ? valW + charW * (s.name.length + 1) : valW); // the selected station always keeps its name, even if it must overlap
-    taken.push(spot.box);
-    const dir = spot.dir, offset = spot.off;
-    if (phone()) L.circleMarker([s.lat, s.lon], { pane: "hit", radius: 22, stroke: false, fillOpacity: 0, bubblingMouseEvents: false }).on("click", e => select(shown().reduce((n, t) => map.distance(e.latlng, [t.lat, t.lon]) < map.distance(e.latlng, [n.lat, n.lon]) ? t : n).id)).addTo(grp); // overlapping pads: pick the station nearest the tap // 44px touch target
+      .reduce((best, c) => (c.cost = costAgainst(taken.filter(q => !g.own.includes(q)), c.box)) < best.cost ? c : best, { cost: Infinity }); // a station's own dot is no obstacle
+    // tiers: no values at overview (the selected station keeps name + value); a group of several shows only its badge. Still colliding: drop names, then values.
+    let tip = (!mg || g.count === 1) && (tier >= 1 || sel), nm = sel || tier === 2, spot;
+    const valW = 14 + charW * val.length, nmW = charW * (s.name.length + 1);
+    if (tip) {
+      spot = bestSpot(nm ? valW + nmW : valW);
+      if (!sel && spot.cost > 0 && nm) { nm = false; spot = bestSpot(valW); }
+      if (!sel && spot.cost > 0) tip = false; else taken.push(spot.box);
+    }
+    const names = g.mem.map(m => m.name), label = mg ? `${g.mem.length} stations: ${names.join(", ")}` : `${s.name}, ${wo ? "wind " : ""}${val === "–" ? "no data" : val}`;
+    if (phone()) L.circleMarker(g.ll, { pane: "hit", radius: 22, stroke: false, fillOpacity: 0, bubblingMouseEvents: false }).on("click", e => tap(e.latlng)).addTo(lg2); // 44px touch target
     // wind-only: just the arrow (or a calm ring) centred in a 44px box, haloed when selected; snow stations keep the coloured dot
-    const m = wo ? L.marker([s.lat, s.lon], { keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [44, 44], iconAnchor: [22, 22], html: `<svg width="44" height="44" viewBox="-22 -22 44 44"><circle r="13" fill="${sel ? css("--panel") : "transparent"}"${sel ? ` stroke="${css("--fg")}" stroke-width="3"` : ""}/>${arrowOn(s) ? arrow(0, 0, (s.wr + 180) % 360, css("--wind")) : `<circle r="4.5" fill="${css("--panel")}" stroke="${css("--wind")}" stroke-width="2"/>`}</svg>` }) }).addTo(grp)
-      : L.circleMarker([s.lat, s.lon], { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1, bubblingMouseEvents: false }).addTo(grp);
-    m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b${bad ? ' class="nd"' : ""}>${esc(val)}</b>`, { permanent: true, direction: dir, offset, interactive: true, className: "val" + (sel ? " sel" : "") });
-    m.on("click", () => select(s.id)); // interactive tooltip clicks bubble here too
+    const m = wo ? L.marker(g.ll, { keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [44, 44], iconAnchor: [22, 22], html: `<svg width="44" height="44" viewBox="-22 -22 44 44"><circle r="13" fill="${sel ? css("--panel") : "transparent"}"${sel ? ` stroke="${css("--fg")}" stroke-width="3"` : ""}/>${arrowOn(s) ? arrow(0, 0, (s.wr + 180) % 360, css("--wind")) : `<circle r="4.5" fill="${css("--panel")}" stroke="${css("--wind")}" stroke-width="2"/>`}</svg>` }) }).addTo(lg2)
+      : L.circleMarker(g.ll, { radius: sel ? 12 : 9, weight: sel ? 3 : 2, color: sel ? css("--fg") : css("--panel"), fillColor: snow(band(s.hs)), fillOpacity: 1, bubblingMouseEvents: false }).addTo(lg2);
+    if (tip) m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b${bad ? ' class="nd"' : ""}>${esc(val)}</b>`, { permanent: true, direction: spot.dir, offset: spot.off, interactive: true, className: "val" + (sel ? " sel" : "") + (nm ? " wn" : "") });
+    if (mg && g.count > 1) L.marker(g.ll, { interactive: false, keyboard: false, icon: L.divIcon({ className: "gb-ic", iconSize: [16, 16], iconAnchor: [-1, 17], html: `<span class="gb" aria-hidden="true">${g.count}</span>` }) }).addTo(lg2);
+    if (g.arr && mg) L.marker(g.ll, { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (g.arr.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
+    const act = mg ? () => zoomTo(g) : () => select(s.id);
+    m.on("click", act); // interactive tooltip clicks bubble here too
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    t.textContent = `${s.name} · ${s.alt} m · ${wo ? "wind station" : wx ? "weather station" : val}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
+    t.textContent = mg ? label : `${s.name} · ${s.alt} m · ${wo ? "wind station" : wx ? "weather station" : val}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
     if (wo) el.title = t.textContent; else el.append(t); // SVG paths take a <title>, the HTML wind icon a title attribute
     el.setAttribute("tabindex", "0"); el.setAttribute("role", "button"); el.dataset.sid = s.id;
-    el.setAttribute("aria-label", `${s.name}, ${wo ? "wind " : ""}${val === "–" ? "no data" : val}`);
-    el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(s.id); } });
+    el.setAttribute("aria-label", label);
+    el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } });
     if (s.id === focusId) focusEl = el;
   }
-  for (const s of all.filter(arrowVis)) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, s.id === state.selected && vis(s) ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
+  for (const s of loose) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, s.id === state.selected && vis(s) ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
+  for (const lm of landmarks) if (lm.pk && peakOn(lm) && !lm.name.startsWith("Valluga")) { // peaks last: only where they clear every dot, label and control
+    const box = place(lm);
+    if (costAgainst(taken, box) > 0) map.removeLayer(lm.marker); else taken.push(box);
+  }
   focusEl?.focus();
 }
 
