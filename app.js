@@ -212,7 +212,7 @@ function openCard(id) {
     return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + mm(f, fmt) + "</div>";
   }).join("");
   if (sheetOn()) { scrollTo(0, 0); // the sheet is locked while the card is open (CSS), so lower it first
-    map.panInside([s.lat, s.lon], { paddingBottomRight: [0, card.offsetHeight + 24], animate: false }); } // the card covers the map's bottom; offsetHeight ignores its slide-in transform
+    map.panInside([s.lat, s.lon], { paddingBottomRight: [0, card.offsetHeight + 24 + Math.max(0, map.getContainer().getBoundingClientRect().bottom - innerHeight)], animate: false }); } // the card covers the map's bottom; offsetHeight ignores its slide-in transform
   renderMap(); card.classList.add("open"); card.focus();
 }
 function closeCard(refocus = true) {
@@ -223,9 +223,9 @@ function closeCard(refocus = true) {
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
   const id = cardId, s = state.stations.find(x => x.id === id); closeCard(false); // closeCard clears cardId
-  // sheet tab: a wind-only station (no snow depth, no temperature chart worth showing) opens on Wind, else the last-used tab; not persisted (only a tab click saves)
-  if (sheetOn() && s?.type === "wind") tab = "wind";
-  select(id);
+  // a station of type "wind" opens on Wind for this pick only; the user's tab (and localStorage) is restored after the render
+  const prev = tab; if (sheetOn() && s?.type === "wind") tab = "wind";
+  select(id); tab = prev;
   // instant ("auto"): honours prefers-reduced-motion
   requestAnimationFrame(() => requestAnimationFrame(() => (sheetOn() ? chartsec : document.getElementById("condTitle")).scrollIntoView({ block: "start", behavior: "auto" })));
 };

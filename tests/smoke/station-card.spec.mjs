@@ -71,10 +71,12 @@ test("station card: wind station opens on Wind, map keeps the station above the 
     document.querySelector('#map [data-sid="SKAP1"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }, [s.lat, s.lon]);
   await expect(card).toBeVisible();
-  await expect.poll(async () => (await page.locator('#map [data-sid="SKAP1"]').boundingBox()).y).toBeLessThanOrEqual((await card.boundingBox()).y);
+  await expect.poll(async () => (await page.locator('#map [data-sid="SKAP1"]').boundingBox()).y + (await page.locator('#map [data-sid="SKAP1"]').boundingBox()).height).toBeLessThanOrEqual((await card.boundingBox()).y);
   await page.getByRole("button", { name: "Open charts" }).click();
   await expect(page.locator(".chartsec")).toHaveAttribute("data-tab", "wind");
   expect(await page.evaluate(() => localStorage.getItem("tab"))).toBe("cond"); // auto-chosen tab is not saved
+  await page.evaluate(() => select("SKAP2")); // the wind pick does not stick: a snow station opens on the user's tab
+  await expect(page.locator(".chartsec")).toHaveAttribute("data-tab", "cond");
   expect(problems).toEqual([]);
   await context.close();
 });
