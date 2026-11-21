@@ -4,16 +4,23 @@
 Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
   data/forecast.json   5-day snowfall and min/max temperature per station
+  data/hourly.json     {"model": {source, issued}, "hours": {local "YYYY-MM-DDTHH": {field: {stationId: value}}}}, rolling 7 days (+ model hours ahead); see README
+  data/health.json     {run, sources: {tirol, tawes, vorarlberg, model, bulletins: {ok, error, detail}}, flagged, offline}; see README
   data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
 
 Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
        python3 fetch.py --selftest
 """
 
+import contextlib
 import gzip
+import io
 import json
+import math
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -45,6 +52,10 @@ STATIONS = (
     "IPIS1",
 )
 FIELDS = ("hs", "lt", "wg", "wg_boe", "wr")  # per-slot maps in readings.json
+HOURLY_DAYS = 7
+BACKFILL_MAX, BACKFILL_SECONDS = 48, 300  # Tirol archive files per run (newest missing hours first) and wall-clock budget; the rest wait for later runs
+HFIELDS = ("lt", "oft", "rh", "hs", "hr", "pr", "pm", "sm", "mt", "wg", "wg_boe", "wr")  # per-hour maps in hourly.json
+MEASURED = ("lt", "oft", "rh", "hs", "wg", "wg_boe", "wr")  # what makes a Tirol hour "present" (not model, not derived)
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
 LWD = "https://static.avalanche.report/weather_stations/"
 GEO = "https://dataset.api.hub.geosphere.at/v1/station/"
@@ -61,6 +72,46 @@ BULLETINS = {
     "LWD Vorarlberg": "https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json",
 }
 UA = {"User-Agent": "arlberg-snow-dashboard/0.1"}
+# Plausibility checks (flag only, never change a value); thresholds to tune. rh up to 103: saturated sensors read 100–103
+LIMITS = {"hs": (0, 800), "lt": (-45, 35), "oft": (-45, 35), "wg": (0, 250), "wg_boe": (0, 250), "wr": (0, 360), "rh": (0, 103)}  # -> "out of range"
+JUMP = {"hs": (-15, 30), "lt": (-8, 8)}  # allowed change latest hour vs hour before -> "jump"
+STUCK_HOURS, STUCK_WIND = 6, 5  # identical lt (wr: while wg > 5 km/h) for 6 consecutive hours -> "stuck"
+FROZEN_HOURS = 3  # wg == 0 for 3 latest hours while lt < 0 and rh > 95 -> "sensor frozen?"
+FUTURE = timedelta(minutes=10)  # measurement time this far ahead of the run -> "time in future"
+LOCATION_M = 500  # farther from REFERENCE, or another name -> flags["station"] = "location mismatch"
+VALUES = ("hs", "n24", "hsd24", "lt", "wg", "wg_boe", "wr")  # measured value fields of a station dict
+# id: (name, lat, lon) as the feeds reported them on 2026-11-20 (TAWES: GeoSphere's coordinates)
+REFERENCE = {
+    "KSIN1": ("Kappl Kapplerkopf", 47.06064, 10.3255),
+    "SKAP2": ("Kapall Schneestation", 47.14749, 10.25878),
+    "SKAP1": ("Kapall Windstation", 47.14908, 10.24794),
+    "KSIN2": ("Kappl Sinsenergampen", 47.06064, 10.34034),
+    "KSPI2": ("Kappl Spidur Alpe", 47.09232, 10.4119),
+    "SAGA1": ("Gampberg Windstation", 47.10991, 10.27761),
+    "SAGA2": ("Gampberg Schneestation", 47.11174, 10.27135),
+    "SAYO1": ("Osthangbahn Young", 47.13324, 10.22553),
+    "IPIS2": ("Pischgraben", 47.0182, 10.26762),
+    "SAAU2": ("Äußere Rendlalpe", 47.1297, 10.31545),
+    "aea1a765-2cff-3a00-bb88-3cfed1dfd875": ("Ganatschalm", 47.1377, 10.3968),
+    "SAAU1": ("Hochkar", 47.11424, 10.31372),
+    "KDIA2": ("Dias", 47.07911, 10.34524),
+    "c9b477f0-c934-013d-99fc-5af9cc682f9b": ("Kartellboden-Damm", 47.06999, 10.26469),
+    "SARE2": ("Rendl Riffel 1", 47.07774, 10.2662),
+    "IPIS1": ("Madleinkopf", 47.01712, 10.24878),
+    "KDIA1": ("Lattejoch", 47.08458, 10.3386),
+    "SAUL2": ("Ulmerhütte", 47.14702, 10.21192),
+    "KGRO1": ("Kappl Großgfallkopf", 47.10168, 10.40883),
+    "SARE1": ("Salzboden", 47.10168, 10.26708),
+    "TAWES-11110": ("Galzig", 47.12972, 10.23028),
+    "TAWES-11307": ("Langen/Arlberg", 47.13167, 10.12333),
+    "TAWES-11311": ("St. Anton (Tal)", 47.13139, 10.26667),
+    "VOR-ALBO2": ("Albona", 47.1317, 10.17122),
+    "VOR-LANG1": ("Langen Blasegg", 47.14059, 10.11794),
+    "VOR-LECA1": ("Lech/Arlberg", 47.21, 10.14083),
+    "VOR-LECH1": ("Lech Kriegerhorn", 47.2142, 10.11432),
+    "VOR-VALL1": ("Valluga (Radar)", 47.1575, 10.21278),
+    "VOR-ZURS1": ("Zürs Hexenboden", 47.17359, 10.17078),
+}
 
 
 def get_json(url):
@@ -79,6 +130,10 @@ def num(v):
 
 def kmh(x):  # m/s -> km/h
     return None if x is None else num(x * 3.6)
+
+
+def vienna(s):
+    return None if s is None else datetime.fromisoformat(s).astimezone(TZ).isoformat()
 
 
 def depth(v):
@@ -104,7 +159,7 @@ def station(f):
         "wg": num(p.get("WG")),
         "wg_boe": num(p.get("WG_BOE")),
         "wr": num(p.get("WR")),
-        "date": p.get("date"),
+        "date": vienna(p.get("date")),
     }
 
 
@@ -128,7 +183,7 @@ def vor_station(f):
         "wg": num(scale("VW", 3.6)),
         "wg_boe": num(scale("VW_MAX", 3.6)),
         "wr": num(p.get("DW")),
-        "date": datetime.fromisoformat(p["date"]).astimezone(TZ).isoformat(),
+        "date": vienna(p["date"]),
     }
 
 
@@ -146,34 +201,56 @@ def merge(readings, k, t, maps):
         slot.setdefault(f, {}).update(maps.get(f, {}))
 
 
-def smet_history(text, slot_times):
-    """{local slot key: {field: value}} from a SMET file (UTC ISO timestamps; HS m, TA K, VW/VW_MAX m/s); absent fields skipped."""
+def smet_table(text):
+    """{UTC timestamp: {column: float}} from a SMET file; nodata and bad cells omitted (one bad cell must not drop the row)."""
     head, _, data = text.partition("[DATA]")
     hdr = {k.strip(): v.strip() for k, _, v in (ln.partition("=") for ln in head.splitlines()) if v}
-    cols, nodata = hdr["fields"].split(), float(hdr.get("nodata", -999))
-    conv = {"hs": ("HS", lambda x: depth(x * 100)), "lt": ("TA", lambda x: num(x - 273.15)), "wg": ("VW", kmh), "wg_boe": ("VW_MAX", kmh), "wr": ("DW", num)}
-    want = {t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"): t.strftime("%Y-%m-%dT%H") for t in slot_times}
+    cols, nodata = hdr["fields"].split()[1:], float(hdr.get("nodata", -999))
     out = {}
-
-    def cell(r, c):  # one bad cell must not drop the row
-        try:
-            x = float(r[cols.index(c)])
-        except (IndexError, ValueError):
-            return None
-        return None if x == nodata else x
-
     for r in (ln.split() for ln in data.splitlines()):
-        if r and r[0] in want:
-            out[want[r[0]]] = {k: fn(x) for k, (c, fn) in conv.items() if c in cols and (x := cell(r, c)) is not None}
+        if r:
+            out[r[0]] = row = {}
+            for c, x in zip(cols, r[1:]):
+                try:
+                    if float(x) != nodata:
+                        row[c] = float(x)
+                except ValueError:
+                    pass
     return out
 
 
+SMET_CONV = {
+    "lt": ("TA", lambda x: num(x - 273.15)),
+    "rh": ("RH", lambda x: num(x * 100)),
+    "hs": ("HS", lambda x: depth(x * 100)),
+    "wg": ("VW", kmh),
+    "wg_boe": ("VW_MAX", kmh),
+    "wr": ("DW", num),
+}
+
+
+def smet_hourly(tab):
+    """{local hour key: {field: value}} from smet_table (5-min UTC rows; HS m, TA K, RH 0–1, VW m/s); pr = PSUM sum of the 12 rows ending at HH:00, null if any is missing."""
+    out = {}
+    for ts, r in tab.items():
+        if ts.endswith(":00:00Z"):
+            t = datetime.fromisoformat(ts)
+            ps = [tab.get((t - timedelta(minutes=5 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"), {}).get("PSUM") for i in range(12)]
+            v = {k: fn(r[c]) for k, (c, fn) in SMET_CONV.items() if c in r}
+            out[hkey(t)] = {**v, "pr": None if None in ps else num(sum(ps))}
+    return {k: {f: x for f, x in v.items() if x is not None} for k, v in out.items()}
+
+
 def parse_tawes(gj, names):
-    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h."""
+    """GeoSphere geojson -> station dicts, one per feature, using each parameter's newest value. FF/FFX m/s -> km/h.
+    Parameters are staggered: date = newest measurement, dates = {field: time} for fields measured at another time."""
     out = []
     for f in gj["features"]:
         p, id = f["properties"]["parameters"], f["properties"]["station"]
-        v = lambda k: next((x for x in reversed(p.get(k, {}).get("data") or []) if x is not None), None)  # staggered: newest non-null
+        new = lambda k: next(((x, t) for x, t in reversed(list(zip(p.get(k, {}).get("data") or [], gj["timestamps"]))) if x is not None), (None, None))
+        v = lambda k: new(k)[0]
+        at = {f: vienna(new(k)[1]) for f, k in (("hs", "SCHNEE"), ("lt", "TL"), ("wg", "FF"), ("wg_boe", "FFX"), ("wr", "DD")) if new(k)[1]}
+        date = max(at.values(), key=datetime.fromisoformat, default=vienna(gj["timestamps"][-1]))
         out.append(
             {
                 "id": "TAWES-" + id,
@@ -191,32 +268,176 @@ def parse_tawes(gj, names):
                 "wg": kmh(v("FF")),
                 "wg_boe": kmh(v("FFX")),
                 "wr": num(v("DD")),
-                "date": gj["timestamps"][-1],
+                "date": date,
+                "dates": {f: t for f, t in at.items() if t != date},
             }
         )
     return out
 
 
-def tawes_history(gj, slot_keys):
-    """{local slot key: {field: {TAWES-id: value}}} from a historical geojson (UTC 10-min timestamps); absent parameters skipped."""
-    ts = [datetime.fromisoformat(t).astimezone(TZ).strftime("%Y-%m-%dT%H:%M") for t in gj["timestamps"]]
+def tawes_hourly(gj):
+    """{local hour key: {field: {TAWES-id: value}}} from a historical 10-min geojson: instant values at HH:00, pr = RR sum of the 6 intervals ending at HH:00 (null if any is missing)."""
+    # shortcut: each timestamp taken as the end of its 10-min interval (RR is named "Niederschlag der letzten 10 Minuten"); unverified against GeoSphere docs
+    ts = [datetime.fromisoformat(t) for t in gj["timestamps"]]
+    idx = {t: i for i, t in enumerate(ts)}
     out = {}
     for f in gj["features"]:
         p = f["properties"]["parameters"]
         col = lambda n: (p.get(n) or {}).get("data") or [None] * len(ts)
-        for k in slot_keys:
-            if k + ":00" in ts:
-                i = ts.index(k + ":00")
+        rr = col("RR")
+        for i, t in enumerate(ts):
+            if t.minute == 0:
+                ps = [rr[idx[x]] if (x := t - timedelta(minutes=10 * j)) in idx else None for j in range(6)]
                 add(
-                    out.setdefault(k, {x: {} for x in FIELDS}),
+                    out.setdefault(hkey(t), {x: {} for x in HFIELDS}),
                     "TAWES-" + f["properties"]["station"],
                     hs=depth(col("SCHNEE")[i]),
                     lt=num(col("TL")[i]),
+                    rh=num(col("RF")[i]),
+                    pr=None if None in ps else num(sum(ps)),
                     wg=kmh(col("FF")[i]),
                     wg_boe=kmh(col("FFX")[i]),
                     wr=num(col("DD")[i]),
                 )
     return out
+
+
+def hkey(t):
+    return t.astimezone(TZ).strftime("%Y-%m-%dT%H")
+
+
+def hmerge(hours, k, maps, keep=False):
+    """Merge {field: {id: value}} into hours[k], skipping empty maps; keep=True never replaces a value already there."""
+    for f, m in maps.items():
+        if m:
+            d = hours.setdefault(k, {}).setdefault(f, {})
+            d.update({**m, **d} if keep else m)
+
+
+def tirol_hours(feats, by_uuid):
+    """{local hour key: {field: {id: value}}} from avalanche.report features, keyed by each feature's own date floored to the hour, whichever file it came from (a repeated old measurement must not pose as a new hour)."""
+    out = {}
+    for f in feats:
+        p, st = f["properties"], by_uuid.get(f["id"])
+        if st and p.get("date"):
+            add(
+                out.setdefault(hkey(datetime.fromisoformat(p["date"])), {x: {} for x in HFIELDS}),
+                st["id"],
+                lt=num(p.get("LT")),
+                oft=num(p.get("OFT")),
+                rh=num(p.get("RH")),
+                hs=depth(p.get("HS")) if st["type"] == "snow" else None,
+                wg=num(p.get("WG")),
+                wg_boe=num(p.get("WG_BOE")),
+                wr=num(p.get("WR")),
+            )
+    return out
+
+
+def missing_hours(hours, ids, now):
+    """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value."""
+    have = {k for k, v in hours.items() if any(id in v.get(f, {}) for f in MEASURED for id in ids)}
+    t = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)  # step in UTC: local wall hours skip/repeat on DST days
+    out = [t - timedelta(hours=i) for i in range(HOURLY_DAYS * 24, 0, -1)]
+    return [x for x in out if hkey(x) not in have]
+
+
+def backfill(missing):
+    """The missing archive hours this run fetches: newest first, at most BACKFILL_MAX."""
+    return sorted(missing, reverse=True)[:BACKFILL_MAX]
+
+
+def tirol_slot(hours, k):
+    """readings.json maps for slot k, Tirol ids only, from hours[k]: keyed by each feature's own measurement hour, so a stuck feed's old value never poses as the slot's."""
+    return {f: {id: x for id, x in hours.get(k, {}).get(f, {}).items() if id in STATIONS} for f in FIELDS}
+
+
+def hs_rise(hours, ids):
+    """hr[id] at k = positive HS change from the hour before (0 when it fell or stayed); only where both hours have hs."""
+    for k, v in hours.items():
+        prev = hours.get(hkey(datetime.strptime(k, "%Y-%m-%dT%H").replace(tzinfo=TZ).astimezone(timezone.utc) - timedelta(hours=1)), {}).get("hs", {})
+        hr = {id: num(max(0.0, x - prev[id])) for id, x in v.get("hs", {}).items() if id in ids and id in prev}
+        if hr:
+            v["hr"] = hr
+
+
+def prune_hours(hours, now):
+    cutoff = hkey(now.astimezone(timezone.utc) - timedelta(days=HOURLY_DAYS))  # keys sort lexicographically; future model hours stay
+    return {k: v for k, v in hours.items() if k >= cutoff}
+
+
+def series(hours, f, id, t, n):
+    """Values of f for id at the n hours ending at t's hour, newest first (None where missing); steps in UTC (DST-safe)."""
+    t = t.astimezone(timezone.utc)
+    return [hours.get(hkey(t - timedelta(hours=i)), {}).get(f, {}).get(id) for i in range(n)]
+
+
+def dist_m(a, b):
+    """Haversine distance in metres between (lat, lon) pairs."""
+    la1, lo1, la2, lo2 = map(math.radians, (*a, *b))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
+def check(st, hours, now):
+    """{field|"station": reason} for one station dict; flags only, never changes a value. Jump/stuck/frozen read the measured hourly series ending at the field's own measurement hour."""
+    id, fl = st["id"], {}
+    at = {f: datetime.fromisoformat(x) for f in VALUES if (x := (st.get("dates") or {}).get(f) or st.get("date"))}
+    for f, t in at.items():
+        if st.get(f) is not None and t > now + FUTURE:
+            fl[f] = "time in future"
+    for f, (lo, hi) in LIMITS.items():
+        if st.get(f) is not None and not lo <= st[f] <= hi:
+            fl.setdefault(f, "out of range")
+    for f, (fall, rise) in JUMP.items():
+        a, b = series(hours, f, id, at[f], 2) if f in at else (None, None)
+        if a is not None and b is not None and not fall <= a - b <= rise:
+            fl.setdefault(f, "jump")
+    for f in ("lt", "wr"):
+        if f in at:
+            v, w = series(hours, f, id, at[f], STUCK_HOURS), series(hours, "wg", id, at[f], STUCK_HOURS)
+            if v[0] is not None and v.count(v[0]) == STUCK_HOURS and (f == "lt" or all(x is not None and x > STUCK_WIND for x in w)):
+                fl.setdefault(f, "stuck")
+    if st.get("wg") is not None and st.get("wg_boe") is not None and st["wg_boe"] < st["wg"]:
+        fl.setdefault("wg_boe", "gust below mean")
+    if "wg" in at:
+        wg, lt, rh = (series(hours, f, id, at["wg"], FROZEN_HOURS) for f in ("wg", "lt", "rh"))
+        if all(w == 0 and c is not None and c < 0 and r is not None and r > 95 for w, c, r in zip(wg, lt, rh)):
+            for f in ("wg", "wg_boe", "wr"):
+                fl.setdefault(f, "sensor frozen?")
+    ref = REFERENCE.get(id)
+    if not ref or ref[0] != st.get("name") or st.get("lat") is None or st.get("lon") is None or dist_m(ref[1:], (st["lat"], st["lon"])) > LOCATION_M:
+        fl["station"] = "location mismatch"
+    return fl
+
+
+def hour_flags(hours):
+    """hours[k]["flags"] = {id: {field: "out of range"}} (limit checks only), recomputed each run."""
+    for v in hours.values():
+        fl = {}
+        for f, (lo, hi) in LIMITS.items():
+            for id, x in v.get(f, {}).items():
+                if not lo <= x <= hi:
+                    fl.setdefault(id, {})[f] = "out of range"
+        v.pop("flags", None)
+        if fl:
+            v["flags"] = fl
+
+
+def source_of(id):
+    return "tawes" if id.startswith("TAWES-") else "vorarlberg" if id.startswith("VOR-") else "tirol"
+
+
+def carry(path, src):
+    """Station dicts of source src from the previous stations.json, unchanged (old date included), so a failed source ages instead of vanishing."""
+    try:
+        with open(path) as fh:
+            prev = [s for s in json.load(fh)["stations"] if source_of(s["id"]) == src]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print("nothing to carry over for", src, e, file=sys.stderr)
+        return []
+    print(f"carrying over {len(prev)} {src} stations from the last run", file=sys.stderr)
+    return prev
 
 
 def prune(readings, now):
@@ -258,6 +479,11 @@ def daily_snow_from_metno(timeseries, days):
 LEVEL = {"low": 1, "moderate": 2, "considerable": 3, "high": 4, "very_high": 5}
 
 
+def preseason(name, e):
+    """LWD Vorarlberg 404s until its first bulletin of the season: the documented normal state, not a failure."""
+    return name == "LWD Vorarlberg" and isinstance(e, urllib.error.HTTPError) and e.code == 404
+
+
 def parse_danger(bulletin, ids):
     out = {}
     for b in bulletin["bulletins"]:
@@ -285,6 +511,32 @@ def parse_danger(bulletin, ids):
     return out
 
 
+def parse_open_meteo(res, ids, days):
+    """Open-Meteo multi-point response -> (forecast.json points, {hour key: {pm, sm, mt: {id: value}}}). past_days entries are skipped via the time arrays."""
+    pts, model = {}, {}
+    for id, r in zip(ids, res):
+        h, d = r["hourly"], r["daily"]
+        i, j = d["time"].index(days[0]), h["time"].index(days[0] + "T00:00")
+        sd = h["snow_depth"][j:]  # metres, hourly
+        pts[id] = {
+            "snowfall": d["snowfall_sum"][i:],
+            "tmin": d["temperature_2m_min"][i:],
+            "tmax": d["temperature_2m_max"][i:],
+            "depth": [
+                None if all(v is None for v in sd[n * 24 : (n + 1) * 24]) else round(100 * max(v for v in sd[n * 24 : (n + 1) * 24] if v is not None))
+                for n in range(len(days))
+            ],
+        }
+        for t, pm, sm, mt in zip(h["time"], h["precipitation"], h["snowfall"], h["temperature_2m"]):
+            add(model.setdefault(t[:13], {"pm": {}, "sm": {}, "mt": {}}), id, pm=num(pm), sm=num(sm), mt=num(mt))
+    return pts, model
+
+
+def model_meta(prev, model, now):
+    """hourly.json "model": only an Open-Meteo run writes model hours, so the fallback (model None) keeps the previous source and issue time."""
+    return {"source": "Open-Meteo", "issued": now.isoformat(timespec="minutes")} if model else prev
+
+
 def forecast(stations):
     days = [(datetime.now(TZ).date() + timedelta(days=i)).isoformat() for i in range(5)]
     try:
@@ -296,23 +548,11 @@ def forecast(stations):
             ]
         )
         res = get_json(
-            "https://api.open-meteo.com/v1/forecast?" + q + "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max&hourly=snow_depth"
-            "&forecast_days=5&timezone=Europe%2FVienna"
+            "https://api.open-meteo.com/v1/forecast?" + q + "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max"
+            "&hourly=snow_depth,temperature_2m,precipitation,snowfall&past_days=2&forecast_days=5&timezone=Europe%2FVienna"
         )
-        res = res if isinstance(res, list) else [res]
-        pts = {}
-        for s, r in zip(stations, res):
-            depth = r["hourly"]["snow_depth"]  # metres, hourly
-            pts[s["id"]] = {
-                "snowfall": r["daily"]["snowfall_sum"],
-                "tmin": r["daily"]["temperature_2m_min"],
-                "tmax": r["daily"]["temperature_2m_max"],
-                "depth": [
-                    None if all(v is None for v in depth[i * 24 : (i + 1) * 24]) else round(100 * max(v for v in depth[i * 24 : (i + 1) * 24] if v is not None))
-                    for i in range(5)
-                ],
-            }
-        return {"source": "Open-Meteo", "days": days, "points": pts}
+        pts, model = parse_open_meteo(res if isinstance(res, list) else [res], [s["id"] for s in stations], days)
+        return {"source": "Open-Meteo", "days": days, "points": pts}, model
     except Exception as e:
         print("Open-Meteo failed, falling back to MET Norway:", e, file=sys.stderr)
     pts = {}
@@ -325,26 +565,41 @@ def forecast(stations):
             "tmax": [d[x][2] if x in d else None for x in days],
             "depth": None,  # met.no has no snow-depth forecast
         }
-    return {"source": "MET Norway (snowfall estimated from precipitation)", "days": days, "points": pts}
+    return {"source": "MET Norway (snowfall estimated from precipitation)", "days": days, "points": pts}, None
 
 
 def main(days):
     now = datetime.now(TZ)
-    stations = [station(f) for f in get_json(LWD + "stations.geojson")["features"] if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
-    for m in set(STATIONS) - {x["id"] for x in stations}:
-        print("station missing from feed:", m, file=sys.stderr)
+    src = {k: {"ok": True, "error": None, "detail": None} for k in ("tirol", "tawes", "vorarlberg", "model", "bulletins")}  # health.json
+
+    def fail(k, e):
+        src[k].update(ok=False, error=str(e))
+
+    def note(k, msg):  # partial trouble: the source still delivered
+        src[k]["detail"] = "; ".join(filter(None, [src[k]["detail"], msg]))
+
+    live = get_json(LWD + "stations.geojson")["features"]  # primary source: a failure aborts the run
+    stations = [station(f) for f in live if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
+    if gone := sorted(set(STATIONS) - {x["id"] for x in stations}):
+        print("station missing from feed:", *gone, file=sys.stderr)
+        src["tirol"]["detail"] = "missing from feed: " + ", ".join(gone)
     try:  # secondary source: a failure must not abort the run
         q = "tawes-v1-10min?parameters=SCHNEE,TL,FF,FFX,DD&station_ids=" + ",".join(TAWES)
         stations += parse_tawes(get_json(GEO + "current/" + q), TAWES)
     except Exception as e:
         print("GeoSphere TAWES failed:", e, file=sys.stderr)
+        fail("tawes", e)
+        stations += carry("data/stations.json", "tawes")
     try:  # secondary source: a failure must not abort the run
         vor = [vor_station(f) for f in get_json(VOR + "stations_vor.geojson")["features"] if f["properties"].get("shortName") in VOR_IDS]
         stations += vor
-        for m in set(VOR_IDS) - {x["id"][4:] for x in vor}:
-            print("station missing from Vorarlberg feed:", m, file=sys.stderr)
+        if gone := sorted(set(VOR_IDS) - {x["id"][4:] for x in vor}):
+            print("station missing from Vorarlberg feed:", *gone, file=sys.stderr)
+            src["vorarlberg"]["detail"] = "missing from feed: " + ", ".join(gone)
     except Exception as e:
         print("Vorarlberg stations failed:", e, file=sys.stderr)
+        fail("vorarlberg", e)
+        stations += carry("data/stations.json", "vorarlberg")
     by_uuid = {s["uuid"]: s for s in stations}
 
     os.makedirs("data", exist_ok=True)
@@ -353,60 +608,92 @@ def main(days):
             readings = json.load(fh)
     except FileNotFoundError:
         readings = {}
+    try:
+        with open("data/hourly.json") as fh:
+            hourly = json.load(fh)
+        hours = hourly["hours"]
+    except (FileNotFoundError, ValueError, KeyError, TypeError) as e:
+        if not isinstance(e, FileNotFoundError):
+            print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
+        hourly = {"model": {"source": None, "issued": None}, "hours": {}}
+        hours = hourly["hours"]
+    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now), time.monotonic()
+    todo = backfill(miss)  # Tirol archive: only hours not yet recorded, capped so a slow archive can't time out the job
+    for i, t in enumerate(todo):
+        if time.monotonic() - t0 > BACKFILL_SECONDS:
+            todo = todo[:i]
+            break
+        try:
+            for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
+                hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
+        except Exception as e:
+            print("skip hour", t.isoformat(), e, file=sys.stderr)
+            bad += 1
+    if bad:
+        note("tirol", f"archive hours failed: {bad}")
+    if len(miss) > len(todo):
+        note("tirol", f"backfill: {len(miss) - len(todo)} hours left for later runs")
+    try:
+        for k, maps in tirol_hours(live, by_uuid).items():
+            hmerge(hours, k, maps, keep=True)
+    except Exception as e:
+        print("live hour failed:", e, file=sys.stderr)
+        note("tirol", f"live hour failed: {e}")
     sl = slots(days, now)
     iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
-    for s in sl:
-        try:
-            feats = get_json(snapshot_url(s))["features"]
-        except Exception as e:
-            print("skip", s.isoformat(), e, file=sys.stderr)
-            continue
-        maps = {k: {} for k in FIELDS}
-        for f in feats:
-            if f["id"] in by_uuid:
-                p, st = f["properties"], by_uuid[f["id"]]
-                add(
-                    maps,
-                    st["id"],
-                    hs=depth(p.get("HS")) if st["type"] == "snow" else None,
-                    lt=num(p.get("LT")),
-                    wg=num(p.get("WG")),
-                    wg_boe=num(p.get("WG_BOE")),
-                    wr=num(p.get("WR")),
-                )
-        merge(readings, s.strftime("%Y-%m-%dT%H"), s.isoformat(), maps)  # merge: keep other sources' ids (TAWES)
-    try:  # TAWES values at the slot times, one historical request
+    for k, t in iso.items():  # Tirol slots from the date-checked hours (only the 7-day window: older --days slots get no Tirol values)
+        if any((maps := tirol_slot(hours, k)).values()):
+            merge(readings, k, t, maps)  # merge: keep other sources' ids (TAWES)
+    try:  # TAWES slots and hours, one historical request
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
-        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=SCHNEE,TL,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(sl[0])}&end={u(now)}")
-        for k, maps in tawes_history(gj, list(iso)).items():
-            merge(readings, k, iso[k], maps)
+        start = min(sl[:1] + [now - timedelta(days=HOURLY_DAYS, hours=1)])  # whole window each run, so TAWES gaps heal on their own
+        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=TL,RF,RR,SCHNEE,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(start)}&end={u(now)}")
+        for k, maps in tawes_hourly(gj).items():
+            hmerge(hours, k, maps)
+            if k in iso:
+                merge(readings, k, iso[k], {f: maps[f] for f in FIELDS})
     except Exception as e:
         print("TAWES history failed:", e, file=sys.stderr)
+        src["tawes"]["detail"] = f"history failed: {e}"
     for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
         if st["id"].startswith("VOR-"):
             try:
                 req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
                 with urllib.request.urlopen(req, timeout=30) as r:
                     txt = gzip.decompress(r.read()).decode()
-                for k, vals in smet_history(txt, sl).items():
-                    merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items()})
+                for k, vals in smet_hourly(smet_table(txt)).items():
+                    hmerge(hours, k, {f: {st["id"]: v} for f, v in vals.items()})
+                    if k in iso:
+                        merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items() if f in FIELDS})
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
+                note("vorarlberg", f"history failed: {st['id']} {e}")
     readings = prune(readings, now)
     with open("data/readings.json", "w") as fh:
         json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
 
+    for st in stations:
+        st["flags"] = check(st, hours, now)
     with open("data/stations.json", "w") as fh:
         json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
     fsrc = "failed"
     try:  # secondary source: a failure must not abort the run
-        fc = forecast(stations)
+        fc, model = forecast(stations)
+        for k, maps in (model or {}).items():  # model values of this run replace earlier ones at the same hours
+            hours.setdefault(k, {}).update(maps)
+        hourly["model"] = model_meta(hourly["model"], model, now)
         fc["generated"] = now.isoformat(timespec="minutes")
         with open("data/forecast.json", "w") as fh:
             json.dump(fc, fh)
-        fsrc = fc["source"]
+        fsrc = src["model"]["detail"] = fc["source"]
     except Exception as e:
         print("forecast failed:", e, file=sys.stderr)
+        fail("model", e)
+    hs_rise(hours, STATIONS)
+    hourly["hours"] = {k: {f: m for f, m in v.items() if m} for k, v in prune_hours(hours, now).items()}  # empty maps omitted
+    hour_flags(hourly["hours"])
+    with open("data/hourly.json", "w") as fh:
+        json.dump(hourly, fh, sort_keys=True, separators=(",", ":"))
     ids = {s["region"].split()[0] for s in stations if s.get("region")}
     try:  # a bulletin that fails keeps its regions from the last run
         with open("data/danger.json") as fh:
@@ -418,10 +705,26 @@ def main(days):
             regions.update(parse_danger(get_json(url), ids))
         except Exception as e:
             print("avalanche bulletin failed:", name, e, file=sys.stderr)
+            if preseason(name, e):
+                src["bulletins"]["detail"] = "no bulletin published yet"
+                continue
+            fail("bulletins", "; ".join(filter(None, [src["bulletins"]["error"], f"{name}: {e}"])))
     if regions:
         with open("data/danger.json", "w") as fh:
             json.dump({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
-    print(f"{len(stations)} stations, {len(readings)} reading slots, forecast: {fsrc}")
+    health = {
+        "run": now.isoformat(timespec="minutes"),
+        "sources": src,
+        "flagged": [{"id": s["id"], "name": s["name"], "field": f, "reason": r} for s in stations for f, r in s["flags"].items()],
+        "offline": [
+            {"id": s["id"], "name": s["name"], "last": s["date"]}
+            for s in stations
+            if not s["date"] or datetime.fromisoformat(s["date"]) < now - timedelta(hours=24)
+        ],
+    }
+    with open("data/health.json", "w") as fh:
+        json.dump(health, fh)
+    print(f"{len(stations)} stations, {len(readings)} reading slots, {len(hourly['hours'])} hours, forecast: {fsrc}")
 
 
 def selftest():
@@ -505,7 +808,8 @@ def selftest():
     g, a = parse_tawes(gj, TAWES)
     assert (g["id"], g["type"], g["hs"], g["wg"], g["wg_boe"], g["wr"], g["lt"], g["alt"]) == ("TAWES-11110", "wind", None, 19.8, 34.6, 273.0, -2.1, 2079)
     assert (a["type"], a["hs"], a["wg"]) == ("snow", 0.0, 0.7)
-    assert tawes_history(gj, ["2026-11-19T07", "2026-11-19T12"]) == {
+    nonempty = lambda h: {k: {f: m for f, m in v.items() if m} for k, v in h.items()}
+    assert nonempty(tawes_hourly(gj)) == {
         "2026-11-19T07": {  # 06:00 UTC = 07:00 CET; Galzig has no snow, 11311 no FF
             "hs": {"TAWES-11311": 0.0},
             "lt": {"TAWES-11110": -2.1, "TAWES-11311": 2.9},
@@ -514,6 +818,25 @@ def selftest():
             "wr": {"TAWES-11110": 273.0, "TAWES-11311": 226.0},
         }
     }
+    rr = {
+        "timestamps": [f"2026-11-19T{h:02}:{m:02}+00:00" for h, m in [(5, 0), (5, 10), (5, 20), (5, 30), (5, 40), (5, 50), (6, 0), (6, 10), (7, 0)]],
+        "features": [],
+    }
+    rr["features"] = [
+        {
+            "properties": {
+                "station": "1",
+                "parameters": {"RR": {"data": [9, 0.1, 0.2, 0, 0, 0.3, 0.4, None, 1]}, "RF": {"data": [None] * 6 + [88.0, None, None]}},
+            }
+        }
+    ]
+    th = tawes_hourly(rr)  # 07 CET = 05:10..06:00 UTC summed; 06 and 08 CET lack intervals -> null, not a partial sum
+    assert (th["2026-11-19T07"]["pr"], th["2026-11-19T07"]["rh"], th["2026-11-19T06"]["pr"], th["2026-11-19T08"]["pr"]) == (
+        {"TAWES-1": 1.0},
+        {"TAWES-1": 88.0},
+        {},
+        {},
+    )
     no = {"hs": {}, "lt": {}, "wg": {}, "wg_boe": {}, "wr": {}}
     old = {"2026-11-19T07": {"t": "x", "hs": {"A": 1.0}}}  # old slot without the new maps
     merge(old, "2026-11-19T07", "t", {"hs": {"B": 2.0}, "lt": {"A": -1.0}})
@@ -553,7 +876,7 @@ def selftest():
         "SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
         "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n"
     )
-    assert smet_history(smet, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # no VW_MAX/DW columns; nodata per field
+    assert smet_hourly(smet_table(smet)) == {  # no VW_MAX/DW columns; nodata per field
         "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0},
         "2026-11-19T12": {"lt": -2.1},
         "2026-11-19T17": {"hs": 0.0, "lt": -3.1, "wg": 1.8},
@@ -561,11 +884,156 @@ def selftest():
     sm2 = smet.replace("2026-11-19T11:00:00Z 271.0 -999 -999", "2026-11-19T11:00:00Z 271.0 abc").replace(
         "2026-11-19T16:00:00Z 270.0 -0.01 0.5", "2026-11-19T16:00:00Z 270.1 0.15"
     )
-    assert smet_history(sm2, slots(1, datetime(2026, 11, 19, 18, tzinfo=TZ))) == {  # short row and non-numeric cell keep other fields
+    assert smet_hourly(smet_table(sm2)) == {  # short row and non-numeric cell keep other fields
         "2026-11-19T07": {"hs": 15.0, "lt": -3.0, "wg": 36.0},
         "2026-11-19T12": {"lt": -2.1},
         "2026-11-19T17": {"hs": 15.0, "lt": -3.0},
     }
+    rows = "".join(f"2026-11-19T{5 + (m + 5) // 60:02}:{(m + 5) % 60:02}:00Z 0.9 {'-999' if m == 0 else '0.1'}\n" for m in range(0, 120, 5))  # 05:05..07:00 UTC
+    assert smet_hourly(smet_table("[HEADER]\nfields = timestamp RH PSUM\n[DATA]\n" + rows)) == {  # PSUM: 12 values ending at HH:00, 05:05 missing
+        "2026-11-19T07": {"rh": 90.0},
+        "2026-11-19T08": {"rh": 90.0, "pr": 1.2},
+    }
+    by = {"u1": {"id": "SKAP2", "type": "snow"}, "u2": {"id": "SKAP1", "type": "wind"}}
+    feats = [
+        {"id": "u1", "properties": {"date": "2026-11-20T07:10:00+01:00", "LT": -2.8, "OFT": -3.2, "RH": 91.6, "HS": 30.8}},
+        {"id": "u2", "properties": {"date": "2026-11-20T06:00:00+01:00", "LT": -4.6, "HS": 5, "WG": 49.4}},  # older: belongs to 06
+        {"id": "x", "properties": {"date": "2026-11-20T07:00:00+01:00", "LT": 1}},
+    ]
+    th = nonempty(tirol_hours(feats, by))  # e.g. the 08 CET file: each value lands at its own date's hour, never the file's
+    assert th == {
+        "2026-11-20T07": {"lt": {"SKAP2": -2.8}, "oft": {"SKAP2": -3.2}, "rh": {"SKAP2": 91.6}, "hs": {"SKAP2": 30.8}},
+        "2026-11-20T06": {"lt": {"SKAP1": -4.6}, "wg": {"SKAP1": 49.4}},  # wind station hs ignored
+    }
+    hk = {"2026-11-20T06": {"lt": {"SKAP1": -4.0}}}
+    for k, maps in th.items():
+        hmerge(hk, k, maps, keep=True)
+    assert (hk["2026-11-20T06"], hk["2026-11-20T07"]["lt"]) == (
+        {"lt": {"SKAP1": -4.0}, "wg": {"SKAP1": 49.4}},
+        {"SKAP2": -2.8},
+    )  # existing value at H not replaced
+    now = datetime(2026, 11, 20, 8, 30, tzinfo=TZ)
+    hm = {"2026-11-20T07": {"lt": {"SKAP2": 1}}, "2026-11-20T06": {"pm": {"SKAP2": 1}, "lt": {"TAWES-1": 1}}}  # model/other sources don't count
+    mh = [hkey(t) for t in missing_hours(hm, STATIONS, now)]
+    assert (len(mh), mh[0], mh[-2:]) == (167, "2026-11-13T08", ["2026-11-20T05", "2026-11-20T06"])
+    hr = {
+        "2026-11-20T06": {"hs": {"SKAP2": 30.0, "V": 1}},
+        "2026-11-20T07": {"hs": {"SKAP2": 30.8, "V": 5}},
+        "2026-11-20T08": {"hs": {"SKAP2": 30.1}},
+        "2026-11-20T10": {"hs": {"SKAP2": 40}},
+    }
+    hs_rise(hr, STATIONS)
+    assert [hr[k].get("hr") for k in sorted(hr)] == [None, {"SKAP2": 0.8}, {"SKAP2": 0.0}, None]  # no negative, no gap-spanning rise, Tirol ids only
+    for d, n in [(datetime(2026, 3, 29, 8, 30, tzinfo=TZ), 168), (datetime(2026, 10, 25, 8, 30, tzinfo=TZ), 167)]:
+        mk = [hkey(t) for t in missing_hours({}, STATIONS, d)]  # 168 real hours; autumn repeats T02, spring has no T02
+        assert (len(mk), len(set(mk)), "2026-03-29T02" in mk, sorted(prune_hours(dict.fromkeys(mk, 1), d)) == sorted(set(mk))) == (168, n, False, True)
+    hd = {
+        "2026-03-29T01": {"hs": {"SKAP2": 10}},
+        "2026-03-29T03": {"hs": {"SKAP2": 11}},
+        "2026-10-25T01": {"hs": {"SKAP2": 10}},
+        "2026-10-25T02": {"hs": {"SKAP2": 11}},
+    }
+    hd["2026-10-25T03"] = {"hs": {"SKAP2": 12}}
+    hs_rise(hd, STATIONS)
+    assert [hd[k].get("hr") for k in sorted(hd)] == [None, {"SKAP2": 1.0}, None, {"SKAP2": 1.0}, {"SKAP2": 1.0}]  # 01 -> 03 CEST is one real hour
+    assert sorted(prune_hours({"2026-11-13T07": 1, "2026-11-13T08": 1, "2026-11-25T23": 1}, now)) == ["2026-11-13T08", "2026-11-25T23"]
+    om = {
+        "daily": {
+            "time": ["2026-11-18", "2026-11-19", "2026-11-20"],
+            "snowfall_sum": [9, 9, 2.0],
+            "temperature_2m_min": [9, 9, -5],
+            "temperature_2m_max": [9, 9, 0],
+        },
+        "hourly": {
+            "time": [f"2026-11-{d}T{h:02}:00" for d in (18, 19, 20) for h in range(24)],
+            "snow_depth": [9.0] * 48 + [0.5] * 23 + [None],
+            "temperature_2m": [-1.04] * 72,
+            "precipitation": [0.2] * 72,
+            "snowfall": [None] * 72,
+        },
+    }
+    pts, model = parse_open_meteo([om], ["A"], ["2026-11-20"])
+    assert pts == {"A": {"snowfall": [2.0], "tmin": [-5], "tmax": [0], "depth": [50]}}  # past_days entries skipped
+    assert (len(model), model["2026-11-18T00"], model["2026-11-20T23"]) == (
+        72,
+        {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}},
+        {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}},
+    )
+    # plausibility: a clean station gets {}, each rule flags only its own field
+    now = datetime(2026, 11, 20, 12, 30, tzinfo=TZ)
+    ok = {"id": "SKAP1", "name": "Kapall Windstation", "lat": 47.14908, "lon": 10.24794, "hs": None, "lt": -4.0, "wg": 20.0, "wg_boe": 30.0, "wr": 200.0}
+    ok["date"] = "2026-11-20T12:10:00+01:00"
+    hk = lambda n, f, vals: {hkey(now - timedelta(hours=i)): {f: {"SKAP1": x}} for i, x in zip(range(n), vals)}  # newest first, from 12h
+    hh = lambda *maps: {k: {f: m for d in maps for f, m in d.get(k, {}).items()} for d in maps for k in d}
+    assert check(ok, {}, now) == {}
+    assert check({**ok, "lt": -50.0, "wr": 361.0, "wg": 260.0, "wg_boe": 270.0}, {}, now) == {
+        "lt": "out of range",
+        "wr": "out of range",
+        "wg": "out of range",
+        "wg_boe": "out of range",
+    }
+    hl = {"2026-11-20T12": {"hs": {"A": 900.0, "B": 50.0}, "rh": {"A": 103.1, "B": 103.0}}, "2026-11-20T11": {"lt": {"A": 1.0}, "flags": {"A": {"lt": "x"}}}}
+    hour_flags(hl)  # limits per hour; stale flags of an earlier run dropped
+    assert (hl["2026-11-20T12"]["flags"], "flags" in hl["2026-11-20T11"]) == ({"A": {"hs": "out of range", "rh": "out of range"}}, False)
+    sn = {**ok, "id": "SKAP2", "name": "Kapall Schneestation", "lat": 47.14749, "lon": 10.25878, "hs": 50.0, "wg": None, "wg_boe": None, "wr": None}
+    jh = lambda f, a, b: {"2026-11-20T12": {f: {"SKAP2": a}}, "2026-11-20T11": {f: {"SKAP2": b}}}
+    assert [check(sn, jh("hs", a, b), now).get("hs") for a, b in [(50, 19), (50, 20), (50, 66), (50, 65)]] == [
+        "jump",
+        None,
+        "jump",
+        None,
+    ]  # +31 / -16 jump, +30 / -15 allowed
+    assert [check(sn, jh("lt", a, b), now).get("lt") for a, b in [(-4, 4.5), (-4, 4), (5, -3.5)]] == ["jump", None, "jump"]
+    assert check(sn, {"2026-11-20T12": {"hs": {"SKAP2": 50}}, "2026-11-20T10": {"hs": {"SKAP2": 0}}}, now) == {}  # gap: no previous hour, no jump
+    assert check(ok, hk(6, "lt", [-4.0] * 6), now) == {"lt": "stuck"}
+    assert check(ok, hk(6, "lt", [-4.0] * 5 + [-4.1]), now) == {}  # 5 identical hours are not stuck
+    assert check(ok, hk(6, "lt", [-4.0] * 5 + [None]), now) == {}  # a missing hour breaks the run
+    assert check(ok, hh(hk(6, "wr", [200.0] * 6), hk(6, "wg", [6.0] * 6)), now) == {"wr": "stuck"}
+    assert check(ok, hh(hk(6, "wr", [200.0] * 6), hk(6, "wg", [6.0] * 5 + [5.0])), now) == {}  # calm hour: a vane may rest
+    assert check({**ok, "wg_boe": 19.9}, {}, now) == {"wg_boe": "gust below mean"}
+    fz = hh(hk(3, "wg", [0.0] * 3), hk(3, "lt", [-1.0] * 3), hk(3, "rh", [96.0] * 3))
+    frozen = {"wg": "sensor frozen?", "wg_boe": "sensor frozen?", "wr": "sensor frozen?"}
+    assert (check({**ok, "wg": 0.0, "wg_boe": 0.0}, fz, now), check(ok, {**fz, "2026-11-20T10": {**fz["2026-11-20T10"], "rh": {"SKAP1": 95.0}}}, now)) == (
+        frozen,
+        {},
+    )
+    assert check(ok, {**fz, "2026-11-20T11": {**fz["2026-11-20T11"], "wg": {}}}, now) == {}  # gap in wg: not frozen
+    assert check({**ok, "date": "2026-11-20T12:41:00+01:00"}, {}, now) == {f: "time in future" for f in ("lt", "wg", "wg_boe", "wr")}
+    assert check({**ok, "date": "2026-11-20T12:40:00+01:00"}, {}, now) == {}
+    mv = lambda **kw: check({**ok, **kw}, {}, now).get("station")
+    assert mv(lon=None) == "location mismatch"  # no crash without lon
+    assert (mv(lat=47.15808), mv(lat=47.15308), mv(name="X"), mv(id="NEW1")) == (
+        "location mismatch",
+        None,
+        "location mismatch",
+        "location mismatch",
+    )  # 1 km / 440 m north
+    # dates: Vienna ISO everywhere; TAWES staggered fields get their own time
+    assert station({**f, "properties": {**f["properties"], "date": "2026-11-20T09:20:00+00:00"}})["date"] == "2026-11-20T10:20:00+01:00"
+    assert (g["date"], g["dates"], a["date"], a["dates"]) == ("2026-11-19T07:00:00+01:00", {}, "2026-11-19T07:00:00+01:00", {"wg": "2026-11-19T06:50:00+01:00"})
+    tmp = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"selftest-stations-{os.getpid()}.json")
+    old = [{"id": "SKAP1", "date": "x"}, {"id": "TAWES-11110", "date": "2026-11-19T07:00:00+01:00", "lt": -2.0}, {"id": "VOR-ZURS1", "date": "y"}]
+    with open(tmp, "w") as fh:
+        json.dump({"stations": old}, fh)
+    try:  # carry-over: only the failed source's dicts, unchanged; missing file -> nothing
+        with contextlib.redirect_stderr(io.StringIO()):
+            assert (carry(tmp, "tawes"), carry(tmp, "vorarlberg"), carry(tmp + ".missing", "tawes")) == ([old[1]], [old[2]], [])
+    finally:
+        os.remove(tmp)
+    nf = lambda code: urllib.error.HTTPError("u", code, "x", None, None)
+    assert (preseason("LWD Vorarlberg", nf(404)), preseason("LWD Vorarlberg", nf(500)), preseason("Euregio avalanche.report", nf(404))) == (True, False, False)
+    # backfill: newest missing hours first, at most BACKFILL_MAX per run
+    mh = missing_hours({}, STATIONS, now)
+    assert (len(backfill(mh)), backfill(mh)[0], backfill(mh)[-1], backfill(mh[:3])) == (48, mh[-1], mh[-48], mh[2::-1])
+    # Tirol slots: a stale feature (date older than its file's hour) lands at its own hour, not the slot; other sources' ids stay out
+    sl = {**th, "2026-11-20T07": {**th["2026-11-20T07"], "lt": {**th["2026-11-20T07"]["lt"], "TAWES-11311": 1.0}}}
+    assert (tirol_slot(sl, "2026-11-20T07"), tirol_slot(sl, "2026-11-20T08")) == (
+        {"hs": {"SKAP2": 30.8}, "lt": {"SKAP2": -2.8}, "wg": {}, "wg_boe": {}, "wr": {}},
+        {f: {} for f in FIELDS},
+    )
+    # model label: the fallback keeps the earlier Open-Meteo source and issue time
+    prev = {"source": "Open-Meteo", "issued": "2026-11-20T08:00+01:00"}
+    assert (model_meta(prev, None, now), model_meta(prev, {"x": {}}, now)) == (prev, {"source": "Open-Meteo", "issued": "2026-11-20T12:30+01:00"})
     print("selftest ok")
 
 

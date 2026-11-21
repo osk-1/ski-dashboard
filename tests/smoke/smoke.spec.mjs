@@ -26,8 +26,10 @@ for (const vp of VIEWPORTS) {
         return route.abort();
       });
 
+      await page.clock.setFixedTime(new Date(JSON.parse(fixture("stations")).updated)); // "now" = the fixture's run time, so the conditions window shows its data and model hours
       await page.goto("/index.html");
       await expect(page.locator("#updated")).toContainText("stations"); // data loaded
+      await expect(page.locator("#banner")).toBeHidden(); // health.json run is "now"
       await expect(page.locator("#map .leaflet-container, #map.leaflet-container")).toBeVisible();
       await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible(); // station dots
 
@@ -38,6 +40,25 @@ for (const vp of VIEWPORTS) {
         await expect.poll(() => page.evaluate((i) => !!Chart.getChart(i), id)).toBe(true);
         await expect(page.locator(`#${id}`)).toBeVisible();
       }
+      // conditions chart: a Tirol station (snow surface, HS rise) and a gauge station with model hours after "now"
+      for (const id of ["SKAP2", "VOR-ZURS1"]) {
+        await page.selectOption("#stnSel", id);
+        await expect.poll(() => page.evaluate(() => Chart.getChart("cond")?.data.datasets.map((d) => d.label).join())).toContain("model");
+        await expect(page.locator("#cond")).toBeVisible();
+        await expect(page.locator("#condNote")).toContainText(id === "SKAP2" ? "refroze" : "Overnight min");
+        if (id === "SKAP2") await page.locator("#condBox").screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}-cond-skap2.png`) });
+      }
+      await page.click("#condWin button[data-h='1']");
+      await expect(page.locator("#condNow")).toContainText("°C");
+      await expect(page.locator("#condBox")).toBeHidden();
+      // 1 h times: gauge hours are the HH:00 sample; a Tirol hour shows the station's own time when it is that hour, else only "hour of"
+      await expect(page.locator("#condNow .stat").first()).toContainText("20 Nov, 16:00");
+      await page.selectOption("#stnSel", "SKAP2"); // newest hourly lt at 10:00, station time 15:40
+      await expect(page.locator("#condNow .stat").first()).toContainText("hour of 20 Nov, 10:00");
+      await expect(page.locator("#condNow .stat").first().locator("s.bad")).toHaveCount(1);
+      await page.locator("#condNow").screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}-cond-1h.png`) });
+      await page.click("#condWin button[data-h='24']");
+      await expect.poll(() => page.evaluate(() => !!Chart.getChart("cond"))).toBe(true);
       await page.waitForTimeout(500); // chart animation
 
       await page.screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}.png`), fullPage: true });

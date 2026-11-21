@@ -5,9 +5,16 @@ const read = (f) => JSON.parse(readFileSync(new URL(`../tests/fixtures/data/${f}
 const keys = new Set();
 const add = (o) => Object.keys(o).forEach((k) => keys.add(k));
 const stations = read("stations"), forecast = read("forecast"), danger = read("danger");
-add(stations); stations.stations.forEach(add);
+add(stations); stations.stations.forEach((s) => { add(s); add(s.flags); if (s.dates) add(s.dates); }); // flags/dates keys are fields or "station"
 add(forecast); Object.values(forecast.points).forEach(add);
 Object.values(read("readings")).forEach(add); // slot keys are dynamic; the keys inside a slot are the fields
+const hourly = read("hourly");
+add(hourly); add(hourly.model);
+Object.values(hourly.hours).forEach(add); // hour keys are dynamic; the keys inside an hour are the fields
+// hours[k].flags is {stationId: {field: reason}}: ids are dynamic, fields are covered above
+const health = read("health");
+add(health); add(health.sources); Object.values(health.sources).forEach(add);
+health.flagged.forEach(add); health.offline.forEach(add);
 add(danger);
 for (const r of Object.values(danger.regions)) { add(r); r.ratings.forEach(add); r.problems.forEach(add); }
 
