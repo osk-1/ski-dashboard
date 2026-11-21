@@ -21,18 +21,16 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     const card = page.locator("#stationCard");
     await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
 
-    await page.evaluate(() => select("SKAP2")); // the selection the card previews must not change
+    await page.evaluate(() => select("SKAP2"));
     await tap(page, "VOR-ZURS1"); // wind stale, HS fresh, 1920 m
     await expect(card).toBeVisible(); await expect(page.locator("#scAlt")).toHaveText("1920 m");
     const title = await page.locator("#scTitle").textContent();
-    await expect(card).toBeFocused();
     const hs = page.locator("#scRows .scr", { hasText: "Snow height" }), wind = page.locator("#scRows .scr", { hasText: /^Wind(?! direction)/ });
     await expect(hs).toContainText("23 cm"); await expect(hs).toContainText(/\d:\d\d/); // number + age
     await expect(wind).toContainText("no recent data"); await expect(wind).not.toContainText("42.8"); await expect(wind).not.toContainText("43 km");
     await expect(page.locator("#scRows .scr", { hasText: "New snow" })).toHaveCount(0); // not measured here
     await shot(page, "station-card", vp, scheme);
-    expect((await card.boundingBox()).height).toBeLessThanOrEqual(vp.height * 0.45 + 1);
-    for (const b of ["#scClose", "#scOpen"]) expect((await page.locator(b).boundingBox()).height).toBeGreaterThanOrEqual(44);
+    expect((await page.locator("#scClose").boundingBox()).height).toBeGreaterThanOrEqual(44);
 
     await tap(page, "SAGA1"); // wind-only, flagged: suspect, no HS row
     await expect(page.locator("#scRows")).toContainText("suspect: sensor frozen?");
@@ -48,18 +46,13 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await tap(page, "VOR-ZURS1"); await expect(card).toBeVisible();
     await page.locator("#map").click({ position: { x: 5, y: 80 } }); await expect(card).toBeHidden(); // empty map
 
-    await tap(page, "VOR-ZURS1"); await expect(card).toBeVisible(); await page.locator("#scClose").click(); // preview only: selection and charts stay on SKAP2
-    await expect(page.locator("#stnSel")).toHaveValue("SKAP2");
-    expect(await page.evaluate(() => localStorage.getItem("sel"))).toBe("SKAP2");
-    await tap(page, "VOR-ZURS1"); await page.getByRole("button", { name: "Open charts" }).click();
-    await expect(page.locator("#stnSel")).toHaveValue("VOR-ZURS1");
-    await expect.poll(async () => (await page.locator(".chartsec").boundingBox()).y, { timeout: 4000 }).toBeLessThan(40); // scrolled to the top of the charts (smooth scroll settles)
+    await tap(page, "VOR-ZURS1"); await expect(page.locator("#stnSel")).toHaveValue("VOR-ZURS1"); // the card selects the station: the charts below follow
     expect(problems).toEqual([]);
     await context.close();
   });
 }
 
-// #60: Open charts picks the relevant tab (not persisted); a station tapped near the bottom stays above the card
+// #60: tapping a wind station picks the relevant tab (not persisted); a station tapped near the bottom stays above the card
 test("station card: wind station opens on Wind, map keeps the station above the card", async ({ browser }) => {
   const { page, context, problems } = await open(browser, VIEWPORTS[0], "light", { storage: { tab: "cond", layers: JSON.stringify({ on: { snow: true, wind: true } }) } });
   const card = page.locator("#stationCard");
@@ -72,7 +65,6 @@ test("station card: wind station opens on Wind, map keeps the station above the 
   }, [s.lat, s.lon]);
   await expect(card).toBeVisible();
   await expect.poll(async () => (await page.locator('#map [data-sid="SKAP1"]').boundingBox()).y + (await page.locator('#map [data-sid="SKAP1"]').boundingBox()).height).toBeLessThanOrEqual((await card.boundingBox()).y);
-  await page.getByRole("button", { name: "Open charts" }).click();
   await expect(page.locator(".chartsec")).toHaveAttribute("data-tab", "wind");
   expect(await page.evaluate(() => localStorage.getItem("tab"))).toBe("cond"); // auto-chosen tab is not saved
   await page.evaluate("renderCharts()"); // a data refresh keeps the tab

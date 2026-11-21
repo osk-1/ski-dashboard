@@ -1,4 +1,4 @@
-/* global document, map, scrollY, innerHeight, Chart -- page globals inside page.evaluate */
+/* global document, map, scrollY, Chart -- page globals inside page.evaluate */
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
@@ -32,15 +32,13 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     const card = page.locator("#stationCard"); await expect(card).toBeVisible(); await expect(card).toBeFocused();
     await expect(page.locator("#map .val.sel")).toHaveCount(1);
     await expect(card.locator(".scr small").first()).toHaveText(/^24 h: min -?\d+.* · max -?\d+/);
-    await page.waitForTimeout(300); // slide-in
-    expect(await page.evaluate(() => document.elementFromPoint(100, innerHeight - 30).closest("#stationCard") != null)).toBe(true); // on top of the sheet
+    await expect(page.locator("#glance")).toBeHidden(); await expect(page.locator("#stnSel")).toHaveValue("SKAP2"); // the card replaces the overview; the charts follow
     expect(await hit(page, 100)).toBe("map");
     await shot(page, "sheet-card", vp, scheme);
     await page.keyboard.press("Escape"); await expect(card).toBeHidden();
     await page.locator('#map [data-sid="SKAP2"]').first().click(); await expect(card).toBeVisible();
-    await page.getByRole("button", { name: "Open charts" }).click(); // selects and raises the sheet to the charts
-    await expect(card).toBeHidden(); await expect(page.locator("#stnSel")).toHaveValue("SKAP2");
-    await page.waitForFunction(() => Math.abs(document.querySelector(".chartsec").getBoundingClientRect().top) < 40);
+    await page.locator("#scClose").click(); await expect(page.locator("#glance")).toBeVisible(); await page.locator('#map [data-sid="SKAP2"]').first().click(); await expect(page.locator("#stnSel")).toHaveValue("SKAP2");
+    await page.evaluate(() => document.querySelector(".chartsec").scrollIntoView({ block: "start", behavior: "auto" })); // swipe up to the charts
     // one chart at a time, one shared 24 h / 72 h / 7 d switch, notes folded
     await expect(page.locator("#condPanel")).toBeVisible(); await expect(page.locator("#snowPanel")).toBeHidden(); await expect(page.locator("#windPanel")).toBeHidden();
     await expect(page.locator("#condNote")).toBeHidden(); await expect(page.locator("#condPanel .note summary")).toBeVisible();

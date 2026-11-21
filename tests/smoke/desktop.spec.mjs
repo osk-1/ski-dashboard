@@ -55,7 +55,7 @@ test("crossing the phone breakpoint: card closed, panel and card moved, one shar
   await page.setViewportSize({ width: vp.width, height: vp.height });
   await expect(page.locator("html")).toHaveClass(/sheet/);
   await expect(page.locator("body > #mapPanel")).toHaveCount(1);
-  await expect(page.locator("body > #stationCard")).toHaveCount(1);
+  await expect(page.locator("header > #stationCard")).toHaveCount(1);
   expect(await page.evaluate(() => new Set(Object.values(win)).size)).toBe(1); // a selectable shared window
   await expect(page.locator("#snowWin button[data-h='24']")).toHaveAttribute("aria-pressed", "true");
   await page.evaluate(() => openCard("SKAP2"));
