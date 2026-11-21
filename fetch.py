@@ -1146,7 +1146,11 @@ def selftest():
     # the fallback (clear=True) drops its fields from its first hour on, so a 6-hourly gap keeps no older Open-Meteo value; sd and earlier hours stay
     hc = {k: {"sd": {"A": 50.0}, "mt": {"A": 1.0}} for k in ("2026-11-20T11", "2026-11-23T12", "2026-11-23T13")}
     assert merge_model(hc, {"2026-11-23T12": {"mt": {"A": -3.0}, "sd": {}}}, clear=True) == {"mt"}
-    assert hc == {"2026-11-20T11": {"sd": {"A": 50.0}, "mt": {"A": 1.0}}, "2026-11-23T12": {"sd": {"A": 50.0}, "mt": {"A": -3.0}}, "2026-11-23T13": {"sd": {"A": 50.0}}}
+    assert hc == {
+        "2026-11-20T11": {"sd": {"A": 50.0}, "mt": {"A": 1.0}},
+        "2026-11-23T12": {"sd": {"A": 50.0}, "mt": {"A": -3.0}},
+        "2026-11-23T13": {"sd": {"A": 50.0}},
+    }
     # model label: the fallback keeps the earlier Open-Meteo source and issue time
     prev = {"source": "Open-Meteo", "issued": "2026-11-20T08:00+01:00", "fields": {"sd": {"source": "Open-Meteo", "issued": "2026-11-20T08:00+01:00"}}}
     om, mn = {"source": "Open-Meteo", "issued": "2026-11-20T12:30+01:00"}, {"source": "MET Norway", "issued": "2026-11-20T12:30+01:00"}
