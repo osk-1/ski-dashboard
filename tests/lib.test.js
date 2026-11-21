@@ -142,5 +142,6 @@ test("delta: change over backH, null when either end is missing", () => {
   assert.deepEqual(delta(h, "hs", "A", keyMs("2026-11-20T13"), 3), { now: 53.1, then: 50.2, d: 2.9 });
   assert.deepEqual(delta(h, "hs", "A", keyMs("2026-11-20T12"), 2), { now: 51, then: 50.2, d: 0.8 }); // gap hour falls back to the latest value
   assert.equal(delta(h, "hs", "A", keyMs("2026-11-20T13"), 6), null);
+  assert.equal(delta(h, "hs", "A", keyMs("2026-11-20T20"), 1), null); // newest value 7 h old: both ends are the same hour, not a 0 change
   assert.equal(delta(h, "hs", "B", keyMs("2026-11-20T13"), 1), null);
 });

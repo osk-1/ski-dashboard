@@ -34,10 +34,10 @@ const winOr = (v, def) => WINDOWS.includes(v) ? v : def;
 const tickStepH = h => ({ 6: 2, 12: 4, 24: 12, 48: 24, 72: 24, 168: 24 })[h];
 // new snow: hourly HS rise, never negative (settling); gaps stay null
 const risePts = (hours, id, from, to) => slice(hours, "hr", id, from, to).map(p => ({ ...p, y: p.y == null ? null : Math.max(0, p.y) }));
-// change of a field over the last backH hours: { now, then, d } from the newest values at or before each instant; null if either is missing
+// change of a field over the last backH hours: { now, then, d } from the newest values at or before each instant; null if either is missing or both resolve to the same hour (no real comparison)
 const delta = (hours, field, id, now, backH) => {
   const a = latest(hours, field, id, now), b = latest(hours, field, id, now - backH * H);
-  return a && b ? { now: a.y, then: b.y, d: Math.round((a.y - b.y) * 10) / 10 } : null;
+  return a && b && a.k !== b.k ? { now: a.y, then: b.y, d: Math.round((a.y - b.y) * 10) / 10 } : null;
 };
 const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10); // "YYYY-MM-DD" + n days
 // the latest night (18:00-08:00) or day (08:00-18:00) that has ended by `now`, over its full length in hourly.json

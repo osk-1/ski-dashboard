@@ -430,7 +430,7 @@ const forecastZone = (now, label) => ({ id: "zone", beforeDatasetsDraw(c) {
 // numeric (ms) x scale from..to, hourly ticks thinned by window, Vienna-time labels; no date adapter
 const timeAxis = (from, to, h) => { const step = tickStepH(h) * 3600e3; return { type: "linear", min: from, max: to, grid: { display: false },
   afterBuildTicks: ax => { ax.ticks = []; for (let t = Math.ceil(from / 3600e3) * 3600e3; t <= to; t += 3600e3) if (keyMs(viennaKey(t)) === t && (+viennaKey(t).slice(11) * 3600e3) % step === 0) ax.ticks.push({ value: t }); },
-  ticks: { maxRotation: 0, font: { size: 11 }, callback: v => viennaKey(v).endsWith("T00") ? fmtHour(v, true) : fmtHour(v) } }; };
+  ticks: { maxRotation: 0, autoSkipPadding: 8, font: { size: 11 }, callback: v => viennaKey(v).endsWith("T00") ? fmtHour(v, true) : fmtHour(v) } }; };
 // measured series with flagged hours (hourly.json flags) faded, hollow dot, reason in the tooltip
 const fade = c => `color-mix(in srgb, ${c} 30%, transparent)`;
 const flagAt = x => x.chart.data.datasets[x.datasetIndex].data[x.p0DataIndex]?.fl || x.chart.data.datasets[x.datasetIndex].data[x.p1DataIndex]?.fl;
@@ -521,7 +521,7 @@ function renderSnow(s) {
   if (!has) return;
   const now = anchorMs(hours, Date.now()), modelSrc = modelSrcOf(), gauge = /^(TAWES|VOR)-/.test(id);
   el("snowBox").hidden = h === 1; el("snowNow").hidden = h !== 1;
-  const noFc = f => !hasField(hours, f, id);
+  const noFc = f => !hasField(hours, f, id); // 1 h view: whole series
   if (h === 1) {
     const next = f => slice(hours, f, id, now + 1, now + 3600e3)[0], dh = delta(hours, "hs", id, now, 1);
     const nx = (f, name, u) => { const p = next(f); return statHtml(p?.y != null ? `${p.y} ${u}` : noFc(f) ? "no forecast" : "no data", name, p ? fmtSlot(p.x) + " · model" : "", false); };
@@ -536,7 +536,7 @@ function renderSnow(s) {
   const hsL = measLine(hours, id, slice(hours, "hs", id, from, now), "hs", "Snow height", "cm", accent);
   const rise = barSet("Snow depth rise", "cm", risePts(hours, id, from, now), { backgroundColor: rain, yAxisID: "yR", src: `measured · ${srcOf(id)}` });
   const sd = { label: "Depth · model", unit: "cm", src: modelSrc, data: slice(hours, "sd", id, now + 1, to), borderColor: accent, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y" };
-  const sm = barSet("Snowfall · model", "cm", slice(hours, "sm", id, now + 1, to), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, yAxisID: "yR", src: modelSrc });
+  const sm = barSet("Snowfall · model", "cm", slice(hours, "sm", id, now + 1, to), { backgroundColor: "transparent", borderColor: rainM, borderWidth: h >= 72 ? 1 : 1.5, barPercentage: h >= 72 ? .6 : 1, yAxisID: "yR", src: modelSrc });
   const sets = [hsL, sd, rise, sm].filter(d => nn(d.data));
   el("snow").setAttribute("aria-label", `Snow depth chart, ${h} hours either side of now`);
   charts.snow = new Chart(el("snow"), {
@@ -549,8 +549,8 @@ function renderSnow(s) {
   });
   el("snowNote").textContent = [
     nn(hsL.data) ? `Line: measured snow height (${srcOf(id)}); bars: hourly rise, never negative.` : "No snow height measured in this window.",
-    noFc("sd") ? "No forecast for snow depth." : "", noFc("sm") ? "No forecast for snowfall." : "",
-    !noFc("sd") || !noFc("sm") ? `Dashed / outlined: ${modelSrc}.` : "",
+    nn(sd.data) ? "" : "No forecast for snow depth.", nn(sm.data) ? "" : "No forecast for snowfall.",
+    nn(sd.data) || nn(sm.data) ? `Dashed / outlined: ${modelSrc}.` : "",
     ...(hsL.data.some(p => p.fl) ? ["Faded points failed a plausibility check (tap one for the reason)."] : []),
   ].filter(Boolean).join(" ");
 }
