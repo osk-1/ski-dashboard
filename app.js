@@ -104,69 +104,79 @@ const setLegend = on => { document.getElementById("legend").classList.toggle("op
 document.getElementById("legend").addEventListener("click", e => { if (e.target.closest("button")) setLegend(!legendOpen()); });
 // Map layer selector: station categories (a data array, so more can be added) + the avalanche-danger overlay.
 const CATS = [["snow", "Snow"], ["wind", "Wind"], ["weather", "Weather"]];
+const WX = [["new-snow", "New snow"], ["temp", "Temperature"], ["wind", "Wind"], ["gust", "Gust"], ["snow-height", "Snow depth"]]; // weather overlays (avalanche.report, one at a time)
 const catOf = s => s.type === "wind" || s.type === "weather" ? s.type : "snow";
 const DGC = ["#9aa5b1", "#ccff66", "#ffff00", "#ff9900", "#ff0000", "#000"]; // same as .dg0..dg5
-let lay = { on: {}, hide: [] }; // hide: station ids, so new stations default to visible
-try { const j = JSON.parse(localStorage.getItem("layers")); if (j) { if (typeof j.on === "object" && j.on) lay.on = j.on; if (Array.isArray(j.hide)) lay.hide = j.hide; if (typeof j.nsh === "number") lay.nsh = j.nsh; } } catch {}
+let lay = { on: {}, hide: [], wx: null }; // wx: the weather overlay key or null; hide: station ids, so new stations default to visible
+try { const j = JSON.parse(localStorage.getItem("layers")); if (j) { if (typeof j.on === "object" && j.on) lay.on = j.on; if (Array.isArray(j.hide)) lay.hide = j.hide; if (typeof j.nsh === "number") lay.nsh = j.nsh; lay.wx = WX.find(w => w[0] === j.wx)?.[0] ?? (j.on?.newsnow === true ? "new-snow" : null); delete lay.on.newsnow; } } catch {} // saved data is untrusted; newsnow was the old checkbox
 const vis = s => lay.on[catOf(s)] && !lay.hide.includes(s.id); // dot, label, table row, summary
 const arrowVis = s => arrowOn(s) && s.type !== "wind" && lay.on.wind && !lay.hide.includes(s.id); // small wind arrow above a snow/weather dot
 const placed = () => state.stations.filter(s => !misplaced(s)); // a station reported somewhere else is not shown at all
 const shown = () => placed().filter(vis).map(s => goodOnly(s, Date.now())); // map and summary: good values only, the rest null with the reason in .bad
 for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phone() || k === "snow"; // defaults: phone shows snow only; a saved choice wins
-lay.on.newsnow ??= false; lay.nsh ??= 24; // off everywhere: it fetches extra images
-// New-snow overlay (avalanche.report): config loaded on first enable; nsEnd = selected period end (ms, UTC); nsImg caches url -> reprojected data URL
-let nsCfg, nsEnd, nsErr, nsBusy, nsOv, nsPin; const nsImg = {};
-const NS_ATTR = 'New snow: <a href="https://avalanche.report" target="_blank" rel="noopener">GeoSphere Austria via avalanche.report</a>';
-const nsRange = () => nsCfg.timeRanges.find(r => r.timeRange === lay.nsh) || nsCfg.timeRanges[0];
+lay.nsh ??= 24; // the weather overlay is off by default: it fetches extra images
+// Weather overlay (avalanche.report): config per key, loaded on first selection; nsEnd = selected period end (ms, UTC); nsImg caches url -> reprojected data URL
+const nsCfg = {}, nsErr = {}, nsBusy = {}, nsImg = {}; let nsEnd, nsOv, nsPin;
+const nsC = () => nsCfg[lay.wx], nsName = () => WX.find(w => w[0] === lay.wx)[1], nsMinus = v => String(v).replace("-", "−");
+const nsDec = (k, r) => k === "temp" ? (r - 120) / 2 : r; // PNG red channel -> value (temp: °C = (R − 120) / 2)
+const NS_ATTR = 'Weather model: <a href="https://avalanche.report" target="_blank" rel="noopener">GeoSphere Austria via avalanche.report</a>';
+const nsRange = () => nsC().timeRanges.find(r => r.timeRange === lay.nsh) || nsC().timeRanges[0];
 const nsUrl = (tpl, end) => { const d = new Date(end).toISOString(); return tpl.replace("https://wiski.tirol.gv.at/lawine/", "https://static.avalanche.report/").replaceAll("$year", d.slice(0, 4)).replaceAll("$date", d.slice(0, 10)).replaceAll("$hour", d.slice(11, 13)); };
 const nsBounds = () => map.options.maxBounds.pad(1);
 const nsCur = () => nsUrl(nsRange().imageOverlayURL, nsEnd);
-const nsEnds = () => { const r = nsRange(), s = r.timeStepHours * 36e5, i = Date.parse(r.initialTimestamp), lo = Date.parse(r.maxAnalysisTimestamp) - 7 * 864e5, out = [];
+const nsEnds = () => { const r = nsRange(), s = r.timeStepHours * 36e5, i = Date.parse(r.initialTimestamp), lo = Date.parse(r.maxAnalysisTimestamp) - (nsC().timeRanges.length > 1 ? 7 * 864e5 : 24 * 36e5), out = []; // hourly overlays: 24 h back
   for (let t = i + Math.floor((Date.parse(r.maxForecastTimestamp) - i) / s) * s; t >= lo; t -= s) out.push(t); return out; }; // newest first, every initialTimestamp + k·step
-function nsLoad() {
-  nsBusy = true;
-  fetch("https://static.avalanche.report/zamg_meteo/overlays/new-snow/config.json").then(r => r.ok ? r.json() : Promise.reject())
-    .then(c => { if (!c.timeRanges?.length || !c.thresholds?.length || !c.boundingBoxes?.some(b => b.lambert)) throw 0; nsCfg = c; nsEnd = Date.parse(nsRange().initialTimestamp); })
-    .catch(() => { nsErr = true; }).finally(() => { nsBusy = false; nsPanel(); renderMap(); });
+function nsLoad(k) {
+  nsBusy[k] = true;
+  fetch(`https://static.avalanche.report/zamg_meteo/overlays/${k}/config.json`).then(r => r.ok ? r.json() : Promise.reject())
+    .then(c => { if (!c.timeRanges?.length || !c.thresholds?.length || !c.boundingBoxes?.some(b => b.lambert || b.bbox)) throw 0; nsCfg[k] = c; if (lay.wx === k) nsEnd = Date.parse(nsRange().initialTimestamp); })
+    .catch(() => { nsErr[k] = true; }).finally(() => { nsBusy[k] = false; nsPanel(); renderMap(); });
 }
 function nsPanel() {
   const x = lp?.querySelector("#nsx"); if (!x) return; // the panel is not in the document yet during onAdd
   const f = document.activeElement?.dataset?.ns; // rebuilt selects must not drop keyboard focus
-  lp.querySelector("#nsn").textContent = lay.on.newsnow && nsErr ? "unavailable" : "";
-  if (!lay.on.newsnow || !nsCfg) { x.innerHTML = ""; return; }
+  for (const w of WX) lp.querySelector(`[data-n="${w[0]}"]`).textContent = nsErr[w[0]] ? "unavailable" : ""; // only the selected one is tried; the note stays until a retry
+  if (!lay.wx || !nsC()) { x.innerHTML = ""; return; }
   const ma = Date.parse(nsRange().maxAnalysisTimestamp), ends = nsEnds(), opt = t => `<option value="${t}"${t === nsEnd ? " selected" : ""}>${esc(fmtSlot(t))}</option>`;
-  x.innerHTML = `<label><span>Period</span><select data-ns="h">${nsCfg.timeRanges.map(r => `<option value="${esc(r.timeRange)}"${r === nsRange() ? " selected" : ""}>${esc(r.timeRange)} h</option>`).join("")}</select></label>` +
+  x.innerHTML = (nsC().timeRanges.length > 1 ? `<label><span>Period</span><select data-ns="h">${nsC().timeRanges.map(r => `<option value="${esc(r.timeRange)}"${r === nsRange() ? " selected" : ""}>${esc(r.timeRange)} h</option>`).join("")}</select></label>` : "") +
     `<label><span>Until</span><select data-ns="t">${[["Forecast", t => t > ma], ["Past", t => t <= ma]].map(([l, f]) => ends.some(f) ? `<optgroup label="${l}">${ends.filter(f).map(opt).join("")}</optgroup>` : "").join("")}</select></label>`;
   if (f) x.querySelector(`[data-ns="${f}"]`)?.focus();
 }
-// GIF in Austria Lambert -> canvas over 3x the map's maxBounds (the view is wider than them, and can zoom out a step), sampled linearly in Web Mercator because L.imageOverlay stretches linearly there
+// lat/lon -> source pixel [col, row] on a W x H image: Lambert box, or (gust) the plain lat/lon box [lon0, lat0, lon1, lat1]
+const nsPix = (lat, lon, W, H) => { const bs = nsC().boundingBoxes, B = bs.find(b => b.lambert)?.lambert;
+  if (B) { const [x, y] = lambert(lat, lon); return [Math.floor((x - B[0]) / ((B[2] - B[0]) / W)), Math.floor((B[3] - y) / ((B[3] - B[1]) / H))]; }
+  const [x0, y0, x1, y1] = bs.findLast(b => b.bbox).bbox; return [Math.floor((lon - x0) / ((x1 - x0) / W)), Math.floor((y1 - lat) / ((y1 - y0) / H))]; };
+// the gust GIF is opaque: clear the border colour flood-filled in from the edges (a plain colour key would also cut real values inside)
+const nsClear = (d, W, H) => { const k = d.slice(0, 3), st = [], hit = (i, j) => { const p = (j * W + i) * 4; if (d[p + 3] && d[p] === k[0] && d[p + 1] === k[1] && d[p + 2] === k[2]) { d[p + 3] = 0; st.push(i, j); } };
+  for (let i = 0; i < W; i++) { hit(i, 0); hit(i, H - 1); } for (let j = 0; j < H; j++) { hit(0, j); hit(W - 1, j); }
+  while (st.length) { const j = st.pop(), i = st.pop(); if (i > 0) hit(i - 1, j); if (i < W - 1) hit(i + 1, j); if (j > 0) hit(i, j - 1); if (j < H - 1) hit(i, j + 1); } };
+// GIF in Austria Lambert (or lat/lon) -> canvas over 3x the map's maxBounds (the view is wider than them, and can zoom out a step), sampled linearly in Web Mercator because L.imageOverlay stretches linearly there
 const nsDraw = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
-  const W = im.width, H = im.height, c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const src = g.getImageData(0, 0, W, H).data;
-  const B = nsCfg.boundingBoxes.find(b => b.lambert).lambert, sx = (B[2] - B[0]) / W, sy = (B[3] - B[1]) / H;
+  const W = im.width, H = im.height, c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const img = g.getImageData(0, 0, W, H), src = img.data; if (!nsC().boundingBoxes.some(b => b.lambert)) nsClear(src, W, H);
   const P = L.Projection.SphericalMercator, mb = nsBounds(), nw = P.project(mb.getNorthWest()), se = P.project(mb.getSouthEast()), dx = se.x - nw.x, dy = se.y - nw.y, k = 600 / Math.max(Math.abs(dx), Math.abs(dy)); // ~3 px per 500 m source px
   const w = Math.round(Math.abs(dx) * k), h = Math.round(Math.abs(dy) * k), o = document.createElement("canvas"); o.width = w; o.height = h; const og = o.getContext("2d"), out = og.createImageData(w, h);
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const ll = P.unproject(L.point(nw.x + (i + .5) * dx / w, nw.y + (j + .5) * dy / h)), [x, y] = lambert(ll.lat, ll.lng), col = Math.floor((x - B[0]) / sx), row = Math.floor((B[3] - y) / sy);
+    const ll = P.unproject(L.point(nw.x + (i + .5) * dx / w, nw.y + (j + .5) * dy / h)), [col, row] = nsPix(ll.lat, ll.lng, W, H);
     if (col >= 0 && col < W && row >= 0 && row < H) out.data.set(src.subarray((row * W + col) * 4, (row * W + col) * 4 + 4), (j * w + i) * 4);
   }
   og.putImageData(out, 0, 0); ok(o.toDataURL()); } catch (e) { no(e); } }; im.src = url; });
-// 1 km PNG (R = cm) -> its R channel, cached by url like the GIF
+// PNG (R = value) -> its R channel, cached by url like the GIF
 const nsPng = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
   const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); ok({ W: im.width, H: im.height, d: g.getImageData(0, 0, im.width, im.height).data }); } catch (e) { no(e); } }; im.src = url; });
-function nsClick(e) { // value of the new-snow PNG under the click, as a pin with a tooltip
+function nsClick(e) { // value of the weather PNG under the click, as a pin with a tooltip
   if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive")) return; // stations and their value tags are not map spots
   const url = nsUrl(nsRange().dataOverlayURL, nsEnd), cur = nsCur();
   (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (!nsOv || nsCur() !== cur) return; // the selection moved on while this loaded
-    const B = nsCfg.boundingBoxes.find(b => b.lambert).lambert, [x, y] = lambert(e.latlng.lat, e.latlng.lng), col = Math.floor((x - B[0]) / ((B[2] - B[0]) / W)), row = Math.floor((B[3] - y) / ((B[3] - B[1]) / H));
+    const [col, row] = nsPix(e.latlng.lat, e.latlng.lng, W, H), k = lay.wx;
     nsPin?.remove(); nsPin = L.circleMarker(e.latlng, { pane: "places", radius: 8, interactive: false, color: css("--fg"), weight: 2, fillOpacity: 0 }).addTo(map)
-      .bindTooltip(`<b>${col >= 0 && col < W && row >= 0 && row < H ? `+${d[(row * W + col) * 4]} cm (${esc(nsRange().timeRange)} h)` : "–"}</b>`, { permanent: true, direction: "right", offset: [8, 0], className: "val" }); },
+      .bindTooltip(`<b>${col >= 0 && col < W && row >= 0 && row < H ? `${k === "new-snow" ? "+" : ""}${nsMinus(nsDec(k, d[(row * W + col) * 4]))} ${esc(nsC().units)}${k === "new-snow" ? ` (${esc(nsRange().timeRange)} h)` : ""}` : "–"}</b>`, { permanent: true, direction: "right", offset: [8, 0], className: "val" }); },
     () => { delete nsImg[url]; });
 }
 function nsShow() {
   const url = nsCur(); if (nsOv) return;
-  (nsImg[url] ??= nsDraw(url)).then(src => { if (nsOv || !lay.on.newsnow || nsCur() !== url) return; // the selection moved on while this loaded
+  (nsImg[url] ??= nsDraw(url)).then(src => { if (nsOv || !lay.wx || !nsC() || nsCur() !== url) return; // the selection moved on while this loaded
     nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .55, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
-    () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); renderMap(); } });
+    () => { delete nsImg[url]; if (lay.wx && nsC() && nsCur() === url) { nsErr[lay.wx] = true; nsPanel(); renderMap(); } });
 }
 // Bottom sheet (phones, sheetMq): the map fills the screen and the page scrolls over it as a sheet.
 // On a phone the panel moves to the top of <body> so the sheet (.wrap) can stack above it; the card follows (above the sheet).
@@ -250,13 +260,16 @@ function initMap() {
     const stn = c => placed().filter(s => catOf(s) === c).sort((a, b) => b.alt - a.alt);
     const row = (attr, id, text, extra = "") => `<label><input type="checkbox" ${attr}="${esc(id)}"> <span>${esc(text)}${extra}</span></label>`;
     const stale = Object.values(state.danger?.regions || {}).some(r => new Date(r.valid_end) < new Date());
-    p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : [], row("data-cat", "newsnow", "New snow", ' <small id="nsn"></small>') + '<div class="ns" id="nsx"></div>', row("data-cat", "peaks", "Peaks")].join("") +
+    p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : [], row("data-cat", "peaks", "Peaks")].join("") +
+      `<fieldset class="wx"><legend>Weather overlay</legend>${[[null, "None"], ...WX].map(([k, n]) => `<label><input type="radio" name="wx" data-wx="${k ?? ""}"> <span>${n} <small data-n="${k ?? ""}"></small></span></label>`).join("")}<div class="ns" id="nsx"></div></fieldset>` +
       CATS.filter(([k]) => stn(k).length).map(([k, n]) => `<div role="group" aria-label="${n} stations"><div class="gh"><b>${n} stations</b><button type="button" data-set="${k}:1" aria-label="All ${n.toLowerCase()} stations">All</button><button type="button" data-set="${k}:0" aria-label="No ${n.toLowerCase()} stations">None</button></div>${stn(k).map(s => row("data-stn", s.id, s.name, ` <small>${s.alt} m</small>`)).join("")}</div>`).join("");
-    const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : !lay.hide.includes(i.dataset.stn); nsPanel(); };
+    const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : i.dataset.wx != null ? i.dataset.wx === (lay.wx ?? "") : !lay.hide.includes(i.dataset.stn); nsPanel(); };
     const size = () => { p.style.maxHeight = map.getSize().y - 80 + "px"; };
     const done = () => { sync(); try { localStorage.setItem("layers", JSON.stringify(lay)); } catch {} renderSummary(); renderMap(); renderTable(); };
-    p.addEventListener("change", e => { const i = e.target; if (i.dataset.ns || i.dataset.cat === "newsnow") nsErr = false; // any new-snow change retries a failed load
-      if (i.dataset.ns) { if (i.dataset.ns === "h") { lay.nsh = +i.value; nsEnd = Date.parse(nsRange().initialTimestamp); } else nsEnd = +i.value; return done(); }
+    p.addEventListener("change", e => { const i = e.target;
+      if (i.dataset.wx != null) { lay.wx = i.dataset.wx || null; if (lay.wx) { delete nsErr[lay.wx]; if (nsC()) nsEnd = Date.parse(nsRange().initialTimestamp); } return done(); } // picking an overlay retries a failed load
+      if (i.dataset.ns) { delete nsErr[lay.wx];
+        if (i.dataset.ns === "h") { lay.nsh = +i.value; nsEnd = Date.parse(nsRange().initialTimestamp); } else nsEnd = +i.value; return done(); }
       if (i.dataset.cat) lay.on[i.dataset.cat] = i.checked; else lay.hide = i.checked ? lay.hide.filter(x => x !== i.dataset.stn) : [...lay.hide, i.dataset.stn]; done(); });
     p.addEventListener("click", e => {
       const t = e.target.closest("button"); if (!t) return;
@@ -298,11 +311,12 @@ function renderMap() {
   const focusId = document.activeElement?.dataset?.sid; // rebuilt markers must not drop keyboard focus
   for (const [k] of CATS) { map[lay.on[k] ? "addLayer" : "removeLayer"](groups[k]); groups[k].clearLayers(); }
   map[lay.on.danger && dangerOk ? "addLayer" : "removeLayer"](dangerLayer);
-  if (nsOv && !(lay.on.newsnow && nsOv.url === nsCur())) { nsOv.remove(); nsOv = null; }
+  if (nsOv && !(lay.wx && nsC() && nsOv.url === nsCur())) { nsOv.remove(); nsOv = null; }
   if (nsPin && !nsOv) { nsPin.remove(); nsPin = null; }
-  if (lay.on.newsnow && !nsErr) nsCfg ? nsShow() : nsBusy || nsLoad();
-  if (lay.on.newsnow && nsCfg && !nsErr) lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>New snow (${esc(nsRange().timeRange)} h):</span>` +
-    nsCfg.thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi)}<span class="cm"> cm</span></span>`).join("") + `<span class="ph">cm</span></span>`);
+  if (lay.wx && !nsErr[lay.wx]) nsC() ? nsShow() : nsBusy[lay.wx] || nsLoad(lay.wx);
+  if (lay.wx && nsC() && !nsErr[lay.wx]) { const u = esc(nsC().units), lbl = lay.wx === "new-snow" ? `${nsName()} (${esc(nsRange().timeRange)} h)` : nsName();
+    lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>${lbl}:</span>` +
+    nsC().thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(nsMinus(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi))}<span class="cm"> ${u}</span></span>`).join("") + `<span class="ph">${u}</span></span>`); }
   // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge at tiers 0–1 (none at tier 2, the highlighted one never), labels follow the zoom tier (#39).
   // Landmark labels move beside/above/below their symbol to clear dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
   const size = map.getSize(), at = (lat, lon) => map.latLngToContainerPoint([lat, lon]), tier = tierOf(map.getZoom(), fitZ);

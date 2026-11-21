@@ -8,7 +8,7 @@ const fixture = (name) => readFileSync(new URL(`../fixtures/data/${name}.json`, 
 export const DESKTOP = { name: "1280", width: 1280, height: 800 };
 export const VIEWPORTS = [{ name: "390", width: 390, height: 844 }, { name: "430", width: 430, height: 932 }];
 
-// overrides: { desktop: true for a mouse, non-mobile context; storage: {key: value} seeded into localStorage, fixtures: {name: Buffer|string} replacing a data file, null = 404 }
+// overrides: { setup: async (page) => extra page.route calls; desktop: true for a mouse, non-mobile context; storage: {key: value} seeded into localStorage, fixtures: {name: Buffer|string} replacing a data file, null = 404 }
 // Returns { page, context, problems }; problems collects console errors and page exceptions.
 export async function open(browser, vp, scheme, overrides = {}) {
   const context = await browser.newContext({ viewport: vp, colorScheme: scheme, deviceScaleFactor: 1, isMobile: !overrides.desktop, hasTouch: !overrides.desktop });
@@ -28,6 +28,7 @@ export async function open(browser, vp, scheme, overrides = {}) {
     return route.abort();
   });
   if (overrides.storage) await page.addInitScript((kv) => { try { for (const k in kv) localStorage.setItem(k, kv[k]); } catch { /* storage blocked */ } }, overrides.storage);
+  await overrides.setup?.(page); // extra routes, registered after (so ahead of) the catch-all
   await page.clock.setFixedTime(new Date(JSON.parse(fixture("stations")).updated)); // "now" = the fixture's run time
   await page.goto("/index.html");
   return { page, context, problems };
