@@ -124,7 +124,7 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
 .panel.fs .legend > button { display: none; }
 .panel.fs .legend.open .wx { display: block; flex-basis: 100%; }
 #stationCard { display: none; }
-.glance { display: none; }
+.glance, .ctabs, .note > summary { display: none; } /* sheet only (below); elsewhere the notes stay open with no summary */
 .panel.fs #stationCard, html.sheet #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
 .panel.fs #stationCard.open, html.sheet #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
 @media (prefers-reduced-motion: reduce) { .panel.fs #stationCard, .panel.fs #stationCard.open, html.sheet #stationCard, html.sheet #stationCard.open { transition: none; } }
@@ -143,6 +143,11 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
   html.sheet .glance .stat b { font-size: 1.35rem; white-space: nowrap; } html.sheet .glance .dg { display: inline-block; font: 600 .85rem/1.6 var(--body); text-transform: none; letter-spacing: 0; color: #142030; } html.sheet .glance .dg4 { color: #fff; } html.sheet .glance .dg5 { color: #ff0000; }
   html.sheet .glance .stat > span { margin-top: 4px; font-size: .68rem; line-height: 1.25; letter-spacing: .03em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   html.sheet #updated { margin-top: 8px; font-size: .75rem; }
+  html.sheet .chartsec { min-height: 100svh; } /* one chart: still tall enough for Open charts to bring the tabs to the top */
+  html.sheet .chartsec .bar { flex-wrap: wrap; } html.sheet .chartsec h2 { display: none; } /* the tab and the station picker name it */ html.sheet .ctabs { display: flex; flex-basis: 100%; max-width: none; }
+  html.sheet .chartsec[data-tab="cond"] :is(#snowPanel, #windPanel), html.sheet .chartsec[data-tab="snow"] :is(#condPanel, #windPanel), html.sheet .chartsec[data-tab="wind"] :is(#condPanel, #snowPanel) { display: none; }
+  html.sheet .seg[data-chart] button:not([data-h="24"], [data-h="72"], [data-h="168"]) { display: none; } /* one shared 24 h / 72 h / 7 d switch */
+  html.sheet .note > summary { display: flex; color: var(--muted); font-size: .8rem; min-height: 44px; } html.sheet .note[open] > summary { margin-bottom: 0; }
   html.sheet h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } /* the page name stays for screen readers only */
   html.sheet .wrap::before { content: ""; justify-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin-bottom: -8px; }
 }
@@ -264,8 +269,8 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
   </div>
 
   <div class="chartsec">
-  <div class="bar" hidden><label for="stnSel">Station</label><select id="stnSel"></select></div>
-  <section class="panel">
+  <div class="bar" hidden><label for="stnSel">Station</label><select id="stnSel"></select><div class="seg ctabs" id="chartTabs" role="group" aria-label="Chart"><button type="button" data-tab="cond">Conditions</button><button type="button" data-tab="snow">Snow</button><button type="button" data-tab="wind">Wind</button></div></div>
+  <section class="panel" id="condPanel">
     <h2 id="condTitle">Conditions</h2>
     <div class="ctl">
       <div class="seg" id="condWin" data-chart="cond" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
@@ -273,7 +278,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     </div>
     <div class="chartbox" id="condBox"><canvas id="cond" role="img" aria-label="Conditions chart"></canvas></div>
     <div class="strip now" id="condNow" hidden></div>
-    <p class="src" id="condNote"></p>
+    <details class="note" open><summary>About this chart</summary><p class="src" id="condNote"></p></details>
   </section>
   <section class="panel" id="snowPanel">
     <h2 id="snowTitle">Snow depth</h2>
@@ -282,7 +287,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     </div>
     <div class="chartbox" id="snowBox"><canvas id="snow" role="img" aria-label="Snow depth chart"></canvas></div>
     <div class="strip now" id="snowNow" hidden></div>
-    <p class="src" id="snowNote"></p>
+    <details class="note" open><summary>About this chart</summary><p class="src" id="snowNote"></p></details>
   </section>
   <section class="panel" id="windPanel">
     <h2 id="windTitle">Wind</h2>
@@ -291,7 +296,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     </div>
     <div class="chartbox" id="windBox"><canvas id="wind" role="img" aria-label="Wind chart"></canvas></div>
     <div class="strip now" id="windNow" hidden></div>
-    <p class="src" id="windNote"></p>
+    <details class="note" open><summary>About this chart</summary><p class="src" id="windNote"></p></details>
   </section>
   </div>
 

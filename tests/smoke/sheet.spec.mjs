@@ -1,4 +1,4 @@
-/* global document, map, scrollY, innerHeight -- page globals inside page.evaluate */
+/* global document, map, scrollY, innerHeight, Chart -- page globals inside page.evaluate */
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
@@ -41,8 +41,20 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await page.locator('#map [data-sid="SKAP2"]').first().click(); await expect(card).toBeVisible();
     await page.getByRole("button", { name: "Open charts" }).click(); // selects and raises the sheet to the charts
     await expect(card).toBeHidden(); await expect(page.locator("#stnSel")).toHaveValue("SKAP2");
-    await page.waitForFunction(() => Math.abs(document.getElementById("condTitle").getBoundingClientRect().top) < 40);
+    await page.waitForFunction(() => Math.abs(document.querySelector(".chartsec").getBoundingClientRect().top) < 40);
+    // one chart at a time, one shared 24 h / 72 h / 7 d switch, notes folded
+    await expect(page.locator("#condPanel")).toBeVisible(); await expect(page.locator("#snowPanel")).toBeHidden(); await expect(page.locator("#windPanel")).toBeHidden();
+    await expect(page.locator("#condNote")).toBeHidden(); await expect(page.locator("#condPanel .note summary")).toBeVisible();
+    await expect(page.locator("#condWin button:visible")).toHaveCount(3);
     await shot(page, "sheet-charts", vp, scheme);
+    await page.locator("#chartTabs button[data-tab='snow']").click();
+    await expect(page.locator("#snowPanel")).toBeVisible(); await expect(page.locator("#condPanel")).toBeHidden();
+    await page.locator("#snowWin button[data-h='168']").click();
+    for (const c of ["condWin", "snowWin", "windWin"]) await expect(page.locator(`#${c} button[data-h='168']`)).toHaveAttribute("aria-pressed", "true");
+    const bars = await page.evaluate(() => Chart.getChart("snow").data.datasets.filter((d) => d.type === "bar").map((d) => d.data.length));
+    expect(Math.max(...bars)).toBeLessThanOrEqual(8); // daily sums, not 168 hourly bars
+    await expect(page.locator("#snowBox")).toBeVisible(); await shot(page, "sheet-snow-7d", vp, scheme);
+    await page.locator("#chartTabs button[data-tab='cond']").click();
 
     await page.evaluate(() => document.getElementById("checks").scrollIntoView()); // fully raised: the sheet covers the map
     expect(await page.evaluate(() => scrollY)).toBeGreaterThan(0); expect(await hit(page, 100)).toBe("sheet");

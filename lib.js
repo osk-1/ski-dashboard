@@ -26,6 +26,20 @@ const slice = (hours, field, id, from, to) => {
   for (let t = Math.ceil(from / H) * H; t <= to; t += H) { const k = viennaKey(t); out.push({ x: t, y: hours[k]?.[field]?.[id] ?? null, k }); }
   return out;
 };
+// hourly points summed into Vienna-local bins of `step` hours (3: 00-03, 03-06 …; 24: calendar days), for bars over long windows; extra: further fields of p summed too
+// each bin: x the middle of its whole bin (partial bins at the window edges too, so every bar sits on one even grid and keeps its width), x0/x1 first/last hour, y null when no hour has a value, n hours with a value of `of` in the window
+// shortcut: an hour's key is its start, so a precipitation sum "ending at 00:00" lands in the new day; fine for a 3 h / day overview, exact attribution would shift keys by one hour
+const binSum = (pts, step, extra = []) => {
+  const out = [];
+  for (const p of pts) {
+    const k = viennaKey(p.x), id = step >= 24 ? k.slice(0, 10) + "T00" : k.slice(0, 11) + String(Math.floor(+k.slice(11) / step) * step).padStart(2, "0");
+    let b = out.at(-1); if (!b || b.id !== id) out.push(b = { id, x0: p.x, y: null, n: 0, of: 0 });
+    b.x1 = p.x; b.of++;
+    if (p.y != null) { b.y = (b.y ?? 0) + p.y; b.n++; }
+    for (const f of extra) if (p[f] != null) b[f] = (b[f] ?? 0) + p[f];
+  }
+  return out.map(({ id, ...b }) => ({ ...b, x: keyMs(id) + step * H / 2, y: b.y == null ? null : Math.round(b.y * 10) / 10, ...Object.fromEntries(extra.map(f => [f, b[f] == null ? undefined : Math.round(b[f] * 10) / 10])) }));
+};
 // newest recorded value of a field at or before `to`
 const latest = (hours, field, id, to) => { const lim = viennaKey(to), k = Object.keys(hours).sort().reverse().find(k => k <= lim && hours[k][field]?.[id] != null); return k ? { k, y: hours[k][field][id] } : null; };
 // chart windows in hours (#40) and the x-axis tick spacing (h) for each
@@ -129,4 +143,4 @@ const strongestGust = (hours, stations, now, h) => stations.reduce((a, s) => {
   const e = extremeOf(hours, "wg_boe", s.id, now - h * H + 1, now, true);
   return e && (!a || e.y > a.y) ? { y: e.y, id: s.id, k: e.k, wr: hours[e.k]?.wr?.[s.id] ?? null } : a;
 }, null);
-if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust };
+if (typeof module !== "undefined") module.exports = { binSum, tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust };

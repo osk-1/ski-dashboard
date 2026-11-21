@@ -177,6 +177,20 @@ try { const q = new URLSearchParams(location.search).get("sheet"); if (q != null
 const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), sheetOn = () => sheetPref && sheetMq.matches;
 if (sheetPref) { document.documentElement.classList.add("sheet"); document.body.prepend(fsPanel); }
 sheetMq.addEventListener("change", () => { if (map) fsRefresh(); });
+if (sheetOn()) { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; } // one shared window; notes behind "About this chart"
+// sheet: one chart at a time (tabs); a tab whose panel the station lacks (no snow / wind) falls back to Conditions
+let tab = "cond";
+try { tab = localStorage.getItem("tab") || "cond"; } catch {}
+const chartsec = document.querySelector(".chartsec"), showTab = () => {
+  if (tab !== "cond" && document.getElementById(tab + "Panel").hidden) tab = "cond";
+  chartsec.dataset.tab = tab;
+  for (const b of document.getElementById("chartTabs").children) { b.setAttribute("aria-pressed", b.dataset.tab === tab); b.hidden = document.getElementById(b.dataset.tab + "Panel").hidden; }
+};
+document.getElementById("chartTabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  tab = b.dataset.tab; try { localStorage.setItem("tab", tab); } catch {}
+  showTab(); const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[tab](s); // drawn while hidden: re-lay out at its real width
+});
 const sheetPeek = () => sheetOn() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
 // keyboard focus stays in the panel: everything beside it (and beside each ancestor) is inert while in full screen
 const fsInert = on => { for (let e = fsPanel; e.parentElement && e !== document.body; e = e.parentElement) for (const x of e.parentElement.children) if (x !== e) x.inert = on; };
@@ -231,7 +245,7 @@ document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
   const id = cardId; closeCard(false); exitFs(); select(id); // closeCard clears cardId (exitFs does nothing in the sheet)
   // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
-  requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("condTitle").scrollIntoView({ block: "start", behavior: "auto" })));
+  requestAnimationFrame(() => requestAnimationFrame(() => (sheetOn() ? chartsec : document.getElementById("condTitle")).scrollIntoView({ block: "start", behavior: "auto" })));
 };
 function initMap() {
   mapDiv.innerHTML = "";
@@ -483,6 +497,7 @@ function renderCharts() {
   renderCond(s);
   renderSnow(s);
   renderWind(s);
+  showTab();
 }
 
 const fmtHour = (t, day) => new Date(t).toLocaleString("en-GB", { ...(day ? { weekday: "short", day: "numeric" } : { hour: "2-digit", minute: "2-digit" }), timeZone: "Europe/Vienna" });
@@ -511,7 +526,11 @@ const fade = c => `color-mix(in srgb, ${c} 30%, transparent)`;
 const flagAt = x => x.chart.data.datasets[x.datasetIndex].data[x.p0DataIndex]?.fl || x.chart.data.datasets[x.datasetIndex].data[x.p1DataIndex]?.fl;
 const measLine = (hours, id, pts, f, label, unit, c, o = {}) => ({ label, unit, kind: "measured", src: `measured · ${srcOf(id)}`, data: pts.map(p => ({ ...p, fl: hours[p.k]?.flags?.[id]?.[f] })), borderColor: c, backgroundColor: c, borderWidth: 2,
   pointRadius: x => x.raw?.fl ? 3.5 : 0, pointBackgroundColor: css("--panel"), pointBorderColor: css("--fg"), pointBorderWidth: 1.5, segment: { borderColor: x => flagAt(x) ? fade(c) : undefined }, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
-const barSet = (label, unit, data, o) => ({ type: "bar", label, unit, data, order: 2, barPercentage: 1, categoryPercentage: .8, ...o });
+// bars over long windows: 3 h sums at 72 h, daily sums at 7 d (a bar per hour would be under 1 px wide)
+const bins = (pts, h, extra) => h >= 72 ? binSum(pts, h >= 168 ? 24 : 3, extra) : pts;
+const binTitle = r => (r.x1 - r.x0 > 3 * 3600e3 ? new Date(r.x0).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "Europe/Vienna" }) + ", day total" : `${fmtSlot(r.x0)}–${fmtHour(r.x1 + 3600e3)}`)
+  + (r.n < r.of ? ` · ${r.n} of ${r.of} h with data` : "");
+const barSet = (label, unit, data, o) => ({ type: "bar", label, unit, data, order: 2, barPercentage: 1, categoryPercentage: .8, grouped: data[0]?.x0 == null, ...o }); // bins: measured and model bars of the current bin overlap at its middle instead of halving every bar
 const statHtml = (t, name, small, bad) => `<div class="stat"><b>${bad ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${small}</small></div>`;
 // each model field has its own source and issue time (hourly.json model.fields: a MET Norway fallback run does not provide sd/sm); old data without fields: the latest run's
 const modelOf = f => { const m = state.hourly?.model || {}; return m.fields?.[f] ?? m; };
@@ -530,7 +549,7 @@ function latestCard(s, f, name, u, hours, now, gauge) {
   return statHtml(v ? `${esc(v.y)} ${u}` : "–", name, `${when}${fl ? ` · suspect: ${esc(fl)}` : old ? " · not current" : ""}`, fl || old);
 }
 // tooltip shared by the three charts: value, time, source (kind = measured | model, set on each dataset); the direction dataset is not hit-tested
-const tip = (o = {}) => ({ filter: i => i.parsed.y != null && !i.dataset.noTip, callbacks: { title: it => fmtSlot(it[0].parsed.x),
+const tip = (o = {}) => ({ filter: i => i.parsed.y != null && !i.dataset.noTip, callbacks: { title: it => it[0].raw?.x0 != null ? binTitle(it[0].raw) : fmtSlot(it[0].parsed.x),
   label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.fl ? ` · suspect: ${c.raw.fl}` : ""}`, footer: it => [...new Set(it.map(i => i.dataset.src))], ...o } });
 // next model hour of field f as a stat card
 const nextCard = (hours, id, now, f, name, u) => {
@@ -567,9 +586,9 @@ function renderCond(s) {
   const oft = hasOft && ln("oft", "Snow surface", "°C", accent);
   const rh = el("condRh").checked && ln("rh", "Humidity", "%", muted, { borderWidth: 1, yAxisID: "yH" });
   const bar = (label, unit, data, o) => barSet(label, unit, data, { yAxisID: "yP", ...o });
-  const pr = bar(gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm", past(pf), { backgroundColor: rain, kind: "measured", src: `measured · ${srcOf(id)}` });
+  const pr = bar(gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm", bins(past(pf), condH), { backgroundColor: rain, kind: "measured", src: `measured · ${srcOf(id)}` });
   const sameRun = modelSrcOf("sm") === modelSrcOf("pm"); // after a fallback sm is an older Open-Meteo run: never shown as this bar's snow
-  const pm = bar("Precip. · model", "mm", slice(hours, "pm", id, from, to).map(p => ({ ...p, sm: sameRun ? hours[p.k]?.sm?.[id] : undefined })), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, kind: "model", src: modelSrcOf("pm") });
+  const pm = bar("Precip. · model", "mm", bins(slice(hours, "pm", id, from, to).map(p => ({ ...p, sm: sameRun ? hours[p.k]?.sm?.[id] : undefined })), condH, ["sm"]), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, kind: "model", src: modelSrcOf("pm") });
   const hasModel = nn(mt.data) || nn(pm.data);
   const sets = [lt, oft, rh, mt, pr, pm].filter(d => d && (d === lt || nn(d.data)));
   const zero = { color: c => c.tick.value === 0 ? css("--fg") : css("--line"), lineWidth: c => c.tick.value === 0 ? 1.5 : 1 };
@@ -619,9 +638,9 @@ function renderSnow(s) {
   }
   const from = now - h * 3600e3, to = now + h * 3600e3, accent = css("--accent"), rain = css("--snow-2"), rainM = css("--snow-3");
   const hsL = measLine(hours, id, slice(hours, "hs", id, from, now), "hs", "Snow height", "cm", accent);
-  const rise = barSet("Snow depth rise", "cm", risePts(hours, id, from, now), { backgroundColor: rain, yAxisID: "yR", kind: "measured", src: `measured · ${srcOf(id)}` });
+  const rise = barSet("Snow depth rise", "cm", bins(risePts(hours, id, from, now), h), { backgroundColor: rain, yAxisID: "yR", kind: "measured", src: `measured · ${srcOf(id)}` });
   const sd = { label: "Depth · model", unit: "cm", kind: "model", src: modelSrcOf("sd"), data: slice(hours, "sd", id, now + 1, to), borderColor: accent, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y" };
-  const sm = barSet("Snowfall · model", "cm", slice(hours, "sm", id, now + 1, to), { backgroundColor: "transparent", borderColor: rainM, borderWidth: h >= 72 ? 1 : 1.5, barPercentage: h >= 72 ? .6 : 1, yAxisID: "yR", kind: "model", src: modelSrcOf("sm") });
+  const sm = barSet("Snowfall · model", "cm", bins(slice(hours, "sm", id, now + 1, to), h), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, yAxisID: "yR", kind: "model", src: modelSrcOf("sm") });
   const sets = [hsL, sd, rise, sm].filter(d => nn(d.data));
   el("snow").setAttribute("aria-label", `Snow depth chart, ${h} hours either side of now`);
   charts.snow = new Chart(el("snow"), {
@@ -629,10 +648,10 @@ function renderSnow(s) {
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearestX", intersect: false },
       plugins: { legend, tooltip: tip() },
       scales: { x: timeAxis(from, to, h), y: { beginAtZero: true, grace: "5%", title: { display: true, text: "cm" } },
-        ...(nn(rise.data) || nn(sm.data) ? { yR: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: "cm / h" } } } : {}) } },
+        ...(nn(rise.data) || nn(sm.data) ? { yR: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: h >= 168 ? "cm / day" : h >= 72 ? "cm / 3 h" : "cm / h" } } } : {}) } },
   });
   el("snowNote").textContent = [
-    nn(hsL.data) ? `Line: measured snow height (${srcOf(id)}); bars: hourly rise, never negative.` : "No snow height measured in this window.",
+    nn(hsL.data) ? `Line: measured snow height (${srcOf(id)}); bars: ${h >= 168 ? "daily" : h >= 72 ? "3-hourly" : "hourly"} rise, never negative.` : "No snow height measured in this window.",
     nn(sd.data) ? "" : "No forecast for snow depth.", nn(sm.data) ? "" : "No forecast for snowfall.",
     nn(sd.data) || nn(sm.data) ? `Dashed / outlined: ${modelSrcs(...(nn(sd.data) ? ["sd"] : []), ...(nn(sm.data) ? ["sm"] : []))}.` : "",
     ...(hsL.data.some(p => p.fl) ? ["Faded points failed a plausibility check (tap one for the reason)."] : []),
@@ -740,7 +759,8 @@ document.getElementById("stnSel").addEventListener("change", e => select(e.targe
 document.addEventListener("click", e => { // every .seg[data-chart] window switch
   const b = e.target.closest(".seg[data-chart] button"); if (!b) return;
   const k = b.closest(".seg").dataset.chart; win[k] = winOr(+b.dataset.h, win[k]);
-  try { localStorage.setItem(winKey(k), win[k]); } catch {}
+  for (const x of sheetOn() ? Object.keys(win) : [k]) { win[x] = win[k]; try { localStorage.setItem(winKey(x), win[x]); } catch {} } // the sheet: one shared window
+  if (sheetOn()) return renderCharts();
   const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[k]?.(s);
 });
 document.getElementById("condRh").addEventListener("change", () => condRedraw());
