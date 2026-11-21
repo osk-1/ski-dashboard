@@ -19,6 +19,9 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await expect(page.locator("#legend")).toBeInViewport();
     await expect(page.locator("#map .val.sel")).toHaveCount(0); // nothing tapped: no station highlighted
     expect((await page.locator("h1").boundingBox()).height).toBeLessThanOrEqual(1); // name for screen readers only
+    await expect(page.locator("#glance .stat")).toHaveCount(4); // danger, deepest, new snow, forecast
+    const peek = vp.height - (await page.locator(".wrap").boundingBox()).y;
+    expect(peek).toBeLessThan(vp.height * .25); expect((await page.locator("#updated").boundingBox()).y + 16).toBeLessThan(vp.height); // the whole glance fits the peek
     await shot(page, "sheet-peek", vp, scheme);
 
     const s = st("SKAP2"); // tap a station: its card slides over the sheet, the map stays visible above it

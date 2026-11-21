@@ -49,6 +49,12 @@ function renderSummary() {
     + (g ? stat(`${Math.round(g.y)} km/h`, `Strongest gust, last ${sumH} h · ${esc(gs?.name ?? g.id)} · ${g.wr == null ? "direction unknown" : `<span style="display:inline-block;transform:rotate(${(g.wr + 180) % 360}deg)" aria-hidden="true">↑</span> from ${compass(g.wr)}`} · ${fmtSlot(keyMs(g.k))}`)
       : `<div class="stat"><b title="No data in this window">–</b><span>Strongest gust, last ${sumH} h</span></div>`)
     + (cards || '<p class="src xl">No station data in this window.</p>') + note;
+  // sheet peek: danger, deepest, new snow last / next 24 h of the highest band with snow data (else with stations) (fixed 24 h, independent of the summary window)
+  const b24 = bandStats(all, hours, now, 24), bands = [...BANDS].reverse().filter(([k]) => b24[k].n > 0), top = bands.find(([k]) => b24[k].snowLast != null || b24[k].snowNext != null) || bands[0], d = dangerNow(), cm = v => v == null ? "–" : `+${Math.round(v)} cm`;
+  document.getElementById("glance").innerHTML = (d ? stat(d.old ? "–" : dchip(d.mx), d.old ? "No current bulletin" : "Danger") : "")
+    + stat(deep ? `${Math.round(deep.hs)} cm` : "–", deep ? `Deepest · ${esc(deep.name)}` : "Deepest")
+    + (top ? stat(cm(b24[top[0]].snowLast), `New 24 h · ${top[2]}`) + stat(cm(b24[top[0]].snowNext), "Next 24 h · model") : "");
+  if (sheetOn()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } // the peek fits the header
 }
 document.getElementById("sumWin").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -59,15 +65,18 @@ document.getElementById("sumWin").addEventListener("click", e => {
 
 const DG = ["No rating", "Low", "Moderate", "Considerable", "High", "Very high"];
 const dchip = (l, t = "") => `<span class="dg dg${l}">${l ? l + " " : ""}${t || DG[l]}</span>`;
+// highest level over the current bulletins (all of them when none is current: old); null without bulletins
+// per region: one bulletin can be current while the other is a leftover from an earlier run
+const dangerNow = () => { const rs = Object.entries(state.danger?.regions || {}); if (!rs.length) return null;
+  const cur = rs.filter(([, r]) => new Date(r.valid_end) >= new Date()), old = !cur.length;
+  return { rs, old, mx: Math.max(0, ...(old ? rs : cur).flatMap(([, r]) => r.ratings.map(x => x.level))) }; };
 function renderDanger() {
-  const rs = Object.entries(state.danger?.regions || {}), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
-  box.hidden = top.hidden = !rs.length;
-  if (!rs.length) return;
-  // per region: one bulletin can be current while the other is a leftover from an earlier run
-  const stale = r => new Date(r.valid_end) < new Date(), cur = rs.filter(([, r]) => !stale(r)), old = !cur.length;
+  const d = dangerNow(), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
+  box.hidden = top.hidden = !d;
+  if (!d) return;
+  const { rs, old, mx } = d, stale = r => new Date(r.valid_end) < new Date();
   const fmt = r => new Date(r.valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
   const day = fmt(rs[0][1]);
-  const mx = Math.max(0, ...(old ? rs : cur).flatMap(([, r]) => r.ratings.map(x => x.level)));
   top.className = "meta" + (old ? " old" : "");
   top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
   box.className = "panel" + (old ? " old" : "");
