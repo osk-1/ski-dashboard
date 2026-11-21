@@ -14,6 +14,7 @@ Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, d
 
 import contextlib
 import gzip
+import http.client
 import io
 import json
 import math
@@ -607,10 +608,14 @@ def forecast(stations, fetch=get_json):
         )
         pts, model = parse_open_meteo(res if isinstance(res, list) else [res], [s["id"] for s in stations], days)
         return {"source": "Open-Meteo", "days": days, "points": pts}, model, None
-    except (urllib.error.URLError, OSError, TimeoutError) as e:  # HTTPError is a URLError; socket timeouts are OSError
+    # HTTPError is a URLError; socket timeouts are OSError; a truncated body is IncompleteRead or JSONDecodeError
+    except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError, json.JSONDecodeError) as e:
         print("Open-Meteo unreachable, falling back to MET Norway:", e, file=sys.stderr)
         perr = None
-    except (KeyError, ValueError, TypeError, IndexError) as e:  # includes JSONDecodeError
+    except (KeyError, ValueError, TypeError, IndexError) as e:
+        print("Open-Meteo response not understood (parser broken?), falling back to MET Norway:", repr(e), file=sys.stderr)
+        perr = f"Open-Meteo response not understood: {e!r}"
+    except Exception as e:  # anything else must still fall back, and is recorded as a parse failure
         print("Open-Meteo response not understood (parser broken?), falling back to MET Norway:", repr(e), file=sys.stderr)
         perr = f"Open-Meteo response not understood: {e!r}"
     pts, model = {}, {}
@@ -1152,11 +1157,28 @@ def selftest():
     def down():
         raise urllib.error.URLError("down")
 
-    for om_fail, want in ((down, None), (lambda: {"hourly": {}}, "Open-Meteo response not understood: KeyError('daily')")):
+    def truncated():
+        raise http.client.IncompleteRead(b"partial")
+
+    def bad_json():
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    def attr():
+        raise AttributeError("'NoneType' object has no attribute 'get'")
+
+    cases = (
+        (down, None, "unreachable"),
+        (lambda: {"hourly": {}}, "Open-Meteo response not understood: KeyError('daily')", "not understood"),
+        (truncated, None, "unreachable"),  # IncompleteRead: network, no parse failure
+        (bad_json, None, "unreachable"),  # JSONDecodeError from a truncated body: network, not parser
+        (attr, "Open-Meteo response not understood: AttributeError(\"'NoneType' object has no attribute 'get'\")", "not understood"),
+    )
+    for om_fail, want, log in cases:
         with contextlib.redirect_stderr(io.StringIO()) as err:
             fc, fmodel, perr = forecast(stn, stub(om_fail))
         assert fc["source"].startswith("MET Norway") and fc["points"]["A"]["depth"] is None and perr == want, (fc["source"], perr)
         assert fmodel["2026-11-19T12"]["mt"] == {"A": 3.0} and fmodel["2026-11-19T12"]["sd"] == {}, fmodel
+        assert log in err.getvalue(), err.getvalue()
         assert ("response not understood" in err.getvalue()) == (want is not None)
     print("selftest ok")
 
