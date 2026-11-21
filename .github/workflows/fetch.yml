@@ -95,6 +95,10 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+      # deploy-pages looks the artifact up ~1s after the upload and intermittently finds none ("Found 0 artifact(s)")
+      - name: Let the artifact become visible
+        if: steps.gate.outputs.run == 'true'
+        run: sleep 20
       - id: deployment
         if: steps.gate.outputs.run == 'true'
         uses: actions/deploy-pages@v5
