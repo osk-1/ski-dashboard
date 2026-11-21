@@ -117,7 +117,7 @@ for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phon
 lay.nsh ??= 24; // the weather overlay is off by default: it fetches extra images
 // Weather overlay (avalanche.report): config per key, loaded on first selection; nsEnd = selected period end (ms, UTC); nsImg caches url -> reprojected data URL
 const nsCfg = {}, nsErr = {}, nsBusy = {}, nsImg = {}; let nsEnd, nsOv, nsPin;
-const nsC = () => nsCfg[lay.wx], nsName = () => WX.find(w => w[0] === lay.wx)[1], nsMinus = v => String(v).replace("-", "−");
+const nsC = () => nsCfg[lay.wx], nsName = () => WX.find(w => w[0] === lay.wx)[1], nsMinus = v => String(v).replaceAll("-", "−");
 const nsDec = (k, r) => k === "temp" ? (r - 120) / 2 : r; // PNG red channel -> value (temp: °C = (R − 120) / 2)
 const NS_ATTR = 'Weather model: <a href="https://avalanche.report" target="_blank" rel="noopener">GeoSphere Austria via avalanche.report</a>';
 const nsRange = () => nsC().timeRanges.find(r => r.timeRange === lay.nsh) || nsC().timeRanges[0];
@@ -272,6 +272,7 @@ function initMap() {
         if (i.dataset.ns === "h") { lay.nsh = +i.value; nsEnd = Date.parse(nsRange().initialTimestamp); } else nsEnd = +i.value; return done(); }
       if (i.dataset.cat) lay.on[i.dataset.cat] = i.checked; else lay.hide = i.checked ? lay.hide.filter(x => x !== i.dataset.stn) : [...lay.hide, i.dataset.stn]; done(); });
     p.addEventListener("click", e => {
+      const w = e.target.closest("input[data-wx]"); if (w?.dataset.wx && w.dataset.wx === lay.wx && nsErr[lay.wx]) { delete nsErr[lay.wx]; return done(); } // clicking the selected, failed overlay again retries (no change event fires)
       const t = e.target.closest("button"); if (!t) return;
       const [c, on] = t.dataset.set.split(":"), ids = state.stations.filter(s => catOf(s) === c).map(s => s.id);
       lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; if (on === "1") lay.on[c] = true; done();

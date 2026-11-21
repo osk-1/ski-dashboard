@@ -1,4 +1,4 @@
-/* global map, L, document, window -- page globals inside page.evaluate */
+/* global map, L, document, window, Image -- page globals inside page.evaluate */
 import { deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import { DESKTOP, open, VIEWPORTS } from "./helpers.mjs";
@@ -13,19 +13,21 @@ const BASE = "https://static.avalanche.report/zamg_meteo/overlays";
 const TS = "2026-11-21T19:00:00+00:00";
 const LAMBERT = { validity: ["2020-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], lambert: [20500, 190500, 719500, 619500] };
 const LATLON = { validity: ["2020-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], bbox: [9.4, 45.6167, 13.0333, 47.8167] };
-const cfg = (k, units, thresholds, box, ranges = [1]) => ({ parameter: k, units, thresholds, boundingBoxes: [box],
-  timeRanges: ranges.map((h) => ({ timeRange: h, timeStepHours: h === 1 ? 1 : 6, initialTimestamp: TS, maxAnalysisTimestamp: TS, maxForecastTimestamp: h === 1 ? "2026-11-23T19:00:00+00:00" : TS,
+const FC = "2026-11-23T19:00:00+00:00";
+const cfg = (k, units, thresholds, box, ranges = [1], fc = FC) => ({ parameter: k, units, thresholds, boundingBoxes: [box],
+  timeRanges: ranges.map((h) => ({ timeRange: h, timeStepHours: h === 1 ? 1 : 6, initialTimestamp: TS, maxAnalysisTimestamp: TS, maxForecastTimestamp: h === 1 ? fc : TS,
     imageOverlayURL: `${BASE}/${k}/$year/$date/$date_$hour-00_${k}.gif`, dataOverlayURL: `${BASE}/${k}/$year/$date/$date_$hour-00_${k}.png` })) });
-const th = (u) => [{ range: [null, -5], color: "#03cdff" }, { range: [-5, 5], color: "#8cffff" }, { range: [5, null], color: "#ff0505" }].map((t) => ({ ...t, u }));
+const th = () => [{ range: [null, -10], color: "#0481ff" }, { range: [-10, -5], color: "#03cdff" }, { range: [-5, 5], color: "#8cffff" }, { range: [5, null], color: "#ff0505" }];
 const CFG = {
   "new-snow": cfg("new-snow", "cm", th(), LAMBERT, [6, 24]),
   temp: cfg("temp", "°C", th(), LAMBERT),
   wind: cfg("wind", "km/h", th(), LAMBERT),
   gust: cfg("gust", "km/h", th(), LATLON),
-  "snow-height": cfg("snow-height", "cm", th(), LAMBERT),
+  "snow-height": cfg("snow-height", "cm", th(), LAMBERT, [1], TS), // analysis only
 };
-// pixel values: temp R = 110 -> −5 °C, wind 30; gust has its value in the top-left pixel only (at lat/lon 47.13, 10.26), snow 99
-const DATA = { "new-snow": [[12, 12], [12, 12]], temp: [[110, 110], [110, 110]], wind: [[30, 30], [30, 30]], gust: [[42, 7], [7, 7]], "snow-height": [[99, 99], [99, 99]] };
+// pixel values: temp R = 110 -> −5 °C, wind 30, snow 99; gust is a 40x40 image with an opaque-looking border (R = 200) around a block of 50 that covers lat/lon 47.13, 10.26
+const GUST = Array.from({ length: 40 }, (_, r) => Array.from({ length: 40 }, (_, c) => (c >= 4 && c < 16 && r >= 6 && r < 20 ? 50 : 200)));
+const DATA = { "new-snow": [[12, 12], [12, 12]], temp: [[110, 110], [110, 110]], wind: [[30, 30], [30, 30]], gust: GUST, "snow-height": [[99, 99], [99, 99]] };
 
 const setup = (fail = []) => async (page) => {
   await page.route(`${BASE}/**`, (route) => {
@@ -49,10 +51,10 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await expect(page.locator("#legend .ls.ns")).toContainText("Temperature");
   await expect(page.locator("#legend .ls.ns")).toContainText("−5–5"); // a real minus sign
+  await expect(page.locator("#legend .ls.ns")).toContainText("−10–−5"); // ...in both numbers
   await expect(page.locator("#legend .ls.ns")).toContainText("°C");
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(0); // hourly: no period
-  expect(await page.locator('#lp [data-ns="t"] option').count()).toBeLessThanOrEqual(25 + 49); // 24 h back + the forecast
-  expect(await page.locator('#lp [data-ns="t"] optgroup[label="Past"] option').count()).toBeLessThanOrEqual(25);
+  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Past"] option')).toHaveCount(25); // now and 24 h back, not 7 days
   await radio(page, "Wind").check();
   await expect(page.locator('#lp input[name="wx"]:checked')).toHaveCount(1);
   await expect(radio(page, "Wind")).toBeChecked();
@@ -62,7 +64,7 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(1);
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await radio(page, "Snow depth").check();
-  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Forecast"]')).toHaveCount(1); // fixture forecasts; the real one is analysis only
+  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Forecast"]')).toHaveCount(0); // analysis only
   // the danger checkbox is independent of the radio group
   const danger = page.locator("#lp label", { hasText: "Avalanche danger" }).locator("input");
   const was = await danger.isChecked();
@@ -77,12 +79,23 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
 test("click values", async ({ browser }) => {
   const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
   await openPanel(page);
-  for (const [name, want] of [["Temperature", "−5 °C"], ["Wind", "30 km/h"], ["Gust", "42 km/h"], ["Snow depth", "99 cm"]]) {
+  for (const [name, want] of [["Temperature", "−5 °C"], ["Wind", "30 km/h"], ["Gust", "50 km/h"], ["Snow depth", "99 cm"]]) {
     await radio(page, name).check();
     await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
     await click(page, 47.13, 10.26);
     await expect(pin(page)).toHaveText(want);
   }
+  expect(problems).toEqual([]);
+});
+
+test("gust border is cleared, inner values kept", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await openPanel(page);
+  await radio(page, "Gust").check();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  const [clear, kept] = await page.evaluate(() => new Promise((ok) => { const im = new Image(); im.onload = () => { const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, im.width, im.height).data; let a = 0, b = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] === 0) a++; else if (d[i] === 50) b++; } ok([a, b]); }; im.src = document.querySelector(".leaflet-image-layer").src; }));
+  expect(clear).toBeGreaterThan(0); // the border colour (R = 200) is gone...
+  expect(kept).toBeGreaterThan(0); // ...the block inside stays
   expect(problems).toEqual([]);
 });
 
@@ -109,6 +122,9 @@ test("one overlay unavailable", async ({ browser }) => {
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await radio(page, "Gust").check(); // retry
   await expect(page.locator('#lp [data-n="gust"]')).toHaveText("unavailable");
+  let tries = 0; await page.route(`${BASE}/gust/config.json`, (r) => { tries++; return r.fulfill({ status: 404, body: "" }); });
+  await radio(page, "Gust").click(); // already selected: clicking it again retries too
+  await expect.poll(() => tries).toBe(1);
   expect(problems.filter((p) => !p.includes("Failed to load resource"))).toEqual([]);
 });
 
