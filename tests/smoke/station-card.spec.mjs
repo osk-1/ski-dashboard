@@ -75,7 +75,7 @@ test("station card: wind station opens on Wind, map keeps the station above the 
   await page.getByRole("button", { name: "Open charts" }).click();
   await expect(page.locator(".chartsec")).toHaveAttribute("data-tab", "wind");
   expect(await page.evaluate(() => localStorage.getItem("tab"))).toBe("cond"); // auto-chosen tab is not saved
-  await page.evaluate(() => window.renderCharts()); // a data refresh keeps the tab
+  await page.evaluate("renderCharts()"); // a data refresh keeps the tab
   await expect(page.locator(".chartsec")).toHaveAttribute("data-tab", "wind");
   expect(problems).toEqual([]);
   await context.close();
