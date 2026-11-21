@@ -50,6 +50,10 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await tap(page, "VOR-ZURS1"); await expect(card).toBeVisible();
     await page.locator("#map").click({ position: { x: 5, y: 80 } }); await expect(card).toBeHidden(); // empty map
 
+    await tap(page, "VOR-ZURS1"); await expect(card).toBeVisible(); await page.locator("#scClose").click(); // preview only: selection and charts stay on SKAP2
+    await expect(page.locator("#stnSel")).toHaveValue("SKAP2");
+    expect(await page.evaluate(() => localStorage.getItem("sel"))).toBe("SKAP2");
+    await expect(page.locator("#condTitle")).toContainText("Kapall Schneestation");
     await tap(page, "VOR-ZURS1"); await page.getByRole("button", { name: "Open charts" }).click();
     await expect(page.locator("#mapPanel")).not.toHaveClass(/fs/);
     await expect(page.locator("#stnSel")).toHaveValue("VOR-ZURS1");

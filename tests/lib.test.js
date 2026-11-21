@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, extremeOf, bandStats, strongestGust } = require("../lib.js");
+const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -165,6 +165,17 @@ test("sumField / extremeOf: flagged and null hours skipped, hr never negative", 
   assert.equal(extremeOf(HR, "lt", "B", TK("10"), TK("13"), true), null);
   assert.equal(extremeOf(HR, "wg_boe", "A", TK("10"), TK("13"), true).y, 40); // 99 is flagged
 });
+test("riseOf: high-water mark of hs; jitter and settling add nothing, gaps keep the mark, flagged skipped", () => {
+  const mk = (...v) => Object.fromEntries(v.map((y, i) => ["2026-11-20T" + String(10 + i), y == null ? {} : { hs: { A: y } }]));
+  const r = (h, n) => riseOf(h, "A", TK("10"), TK(String(10 + n))).v;
+  assert.equal(r(mk(50, 51, 50, 51, 50), 4), 1);
+  assert.equal(r(mk(50, 55, 60), 2), 10);
+  assert.equal(r(mk(50, 48, 55), 2), 5);
+  assert.equal(r(mk(50, null, null, 58), 3), 8); // gap
+  assert.equal(r(mk(50, 55, null, 54, 56), 4), 6); // mark 55 kept over the gap and the dip
+  const f = mk(50, 70, 52); f["2026-11-20T11"].flags = { A: { hs: "x" } };
+  assert.deepEqual(riseOf(f, "A", TK("10"), TK("12")), { v: 2, n: 2, of: 3 });
+});
 test("strongestGust: ties go to the first station, flagged skipped, empty null", () => {
   assert.deepEqual(strongestGust(HR, [{ id: "A" }, { id: "B" }], TK("13"), 4), { y: 40, id: "A", k: "2026-11-20T10", wr: 90 });
   assert.equal(strongestGust(HR, [{ id: "B" }, { id: "A" }], TK("13"), 4).id, "B");
@@ -172,15 +183,17 @@ test("strongestGust: ties go to the first station, flagged skipped, empty null",
   assert.equal(strongestGust(HR, [{ id: "Z" }], TK("13"), 3), null);
 });
 test("past window is (now-h, now]: h hours, not h+1", () => {
-  const h = { "2026-11-20T12": { hr: { A: 1 } }, "2026-11-20T13": { hr: { A: 2 } }, "2026-11-20T14": { hr: { A: 4 }, hs: { A: 1 }, wg_boe: { A: 9 } }, "2026-11-20T11": { wg_boe: { A: 50 } } };
+  const h = { "2026-11-20T12": { hs: { A: 10 } }, "2026-11-20T13": { hs: { A: 11 } }, "2026-11-20T14": { hs: { A: 15 }, wg_boe: { A: 9 } }, "2026-11-20T11": { wg_boe: { A: 50 } } };
   const r = bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 1);
-  assert.equal(r.mid.snowLast, 4); // only the 14 h rise, not 13 h + 14 h
-  assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 2).mid.snowLast, 6);
+  assert.equal(r.mid.snowLast, 0); // 1 h window holds one reading: no rise
+  assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 2).mid.snowLast, 4); // 13, 14 only; 12 is outside
+  assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 3).mid.snowLast, 5);
   assert.equal(strongestGust(h, [{ id: "A" }], TK("14"), 3).y, 9); // 11 h is outside (14-3, 14]
 });
 test("bandStats: medians per band, per-metric counts, partial coverage, empty band", () => {
   const st = [{ id: "A", alt: 1700 }, { id: "B", alt: 1800 }, { id: "Z", alt: 2500 }];
-  const r = bandStats(st, HR, TK("13"), 3); // past (10, 13]: 11, 12 (flagged hr), 13; next (13, 16]: 14
+  const H2 = structuredClone(HR); H2["2026-11-20T11"].hs = { A: 50 }; H2["2026-11-20T13"].hs = { A: 52 };
+  const r = bandStats(st, H2, TK("13"), 3); // past (10, 13]: 11, 12 (flagged hr), 13; next (13, 16]: 14
   assert.deepEqual(r.mid, { n: 1, of: 3, snowLast: 2, snowNext: 1.5, tmin: -1, tmax: 0, snowLastN: 1, snowNextN: 1, tminN: 1, tmaxN: 1, snowLastH: 2, snowNextH: 1 }); // 2 of 3 hours measured, 1 of 3 forecast: partial
   assert.equal(r.valley.n, 0); assert.equal(r.valley.snowLast, null); assert.equal(r.high.n, 0);
   assert.equal(sumField(HR, "hr", "A", TK("10"), TK("13")).of, 4);

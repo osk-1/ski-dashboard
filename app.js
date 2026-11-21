@@ -14,6 +14,7 @@ const win = { cond: 24, snow: 72, wind: 24 }; // chart windows in hours, one swi
 const winKey = k => k + "H"; // localStorage keys condH, snowH, windH
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
+let cardId; const hl = () => cardId ?? state.selected; // map highlight: the card preview, else the selection
 for (const k in win) try { win[k] = winOr(+localStorage.getItem(winKey(k)), win[k]); } catch {}
 
 let chgH = 24, sortBy = { k: "alt", dir: -1 }; // table: change window (hours back) and sort, sort is not persisted
@@ -30,7 +31,7 @@ const badList = bad => Object.entries(group(Object.entries(bad), ([, v]) => badT
 let sumH = 24; // summary window in hours (key sumH)
 try { sumH = winOr(+localStorage.getItem("sumH"), 24); } catch {}
 function renderSummary() {
-  const sh = shown(), s = sh.filter(x => x.hs != null), hours = state.hourly?.hours || {}, now = anchorMs(hours, Date.now()), el = document.getElementById("sumBody");
+  const sh = placed().map(x => goodOnly(x, Date.now())), s = sh.filter(x => x.hs != null), hours = state.hourly?.hours || {}, now = anchorMs(hours, Date.now()), el = document.getElementById("sumBody");
   for (const b of document.getElementById("sumWin").children) b.setAttribute("aria-pressed", +b.dataset.h === sumH);
   const left = sh.filter(x => Object.keys(x.bad).length).map(x => `${esc(x.name)} (${esc(badList(x.bad))})`);
   const note = left.length ? `<p class="src xl">Not current or suspect: ${left.join(" · ")}.</p>` : "";
@@ -167,7 +168,8 @@ function exitFs() {
   document.getElementById("legend").classList.remove("open"); document.getElementById("fsLegend").setAttribute("aria-expanded", "false");
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (fsPushed) { fsPushed = false; if (history.state?.fs) { fsBack = true; history.back(); } } // popstate already consumed the entry when it started the exit
-  scrollTo(0, fsY); fsRefresh(); fsBtn.focus();
+  scrollTo(0, fsY); fsRefresh(); fsBtn.focus({ preventScroll: true }); // plain focus() scrolls the button into view after the restore
+  requestAnimationFrame(() => scrollTo(0, fsY)); // history.back() / the fullscreen exit can move the scroll once the layout settles
 }
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = e => e.currentTarget.setAttribute("aria-expanded", document.getElementById("legend").classList.toggle("open"));
@@ -177,10 +179,10 @@ addEventListener("orientationchange", () => { if (map) fsRefresh(); });
 document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
 // Station card (full screen only): a tap on a station opens it instead of selecting; Open charts leaves full screen and selects.
 const card = document.getElementById("stationCard"), scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
-let cardId;
+
 function openCard(id) {
   const s = state.stations.find(x => x.id === id); if (!s) return;
-  cardId = state.selected = id; // renderMap highlights it; the charts wait for Open charts
+  cardId = id; // renderMap highlights it via hl(); state.selected only changes in select()
   const g = goodOnly(s, Date.now());
   document.getElementById("scTitle").textContent = s.name; document.getElementById("scAlt").textContent = `${s.alt} m`;
   document.getElementById("scRows").innerHTML = scRows.map(([f, fmt]) => {
@@ -192,12 +194,12 @@ function openCard(id) {
 }
 function closeCard(refocus = true) {
   if (!card.classList.contains("open")) return;
-  card.classList.remove("open");
-  if (refocus) (document.querySelector(`#map [data-sid="${CSS.escape(cardId)}"]`) || fsBtn).focus();
+  card.classList.remove("open"); const id = cardId; cardId = undefined; renderMap();
+  if (refocus) (document.querySelector(`#map [data-sid="${CSS.escape(id)}"]`) || fsBtn).focus();
 }
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
-  const id = cardId; exitFs(); select(id);
+  const id = cardId; exitFs(); select(id); // exitFs closes the card (cardId cleared)
   // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
   requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("condTitle").scrollIntoView({ block: "start", behavior: "auto" })));
 };
@@ -297,7 +299,7 @@ function renderMap() {
   ctl.push([cb.left - mb.left, cb.top - mb.top, cb.right - mb.left, cb.bottom - mb.top]);
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * ctl.reduce((c, q) => c + overlap(r, q), 0) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
   const S = shown(), byId = Object.fromEntries(S.map(s => [s.id, s]));
-  const grp = groupByPixel(S.map(s => ({ id: s.id, ...at(s.lat, s.lon), rank: s.type === "wind" ? -2 : s.hs ?? -1 })), tier === 2 ? 0 : 28, state.selected).map(ids => {
+  const grp = groupByPixel(S.map(s => ({ id: s.id, ...at(s.lat, s.lon), rank: s.type === "wind" ? -2 : s.hs ?? -1 })), tier === 2 ? 0 : 28, hl()).map(ids => {
     const mem = ids.map(i => byId[i]), g = mem.length > 1 ? describeGroup(mem) : { lead: mem[0], wind: null, count: 1 };
     const ll = [mem.reduce((a, m) => a + m.lat, 0) / mem.length, mem.reduce((a, m) => a + m.lon, 0) / mem.length], { x, y } = at(...ll);
     const arr = g.wind && arrowOn(g.wind) ? g.wind : arrowVis(g.lead) ? g.lead : null; // merged: the wind member's arrow, else the lead's own
@@ -337,7 +339,7 @@ function renderMap() {
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
   for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {
-    const s = g.lead, { x, y, merged: mg } = g, sel = s.id === state.selected, wo = s.type === "wind", wx = s.type === "weather", wind = hasWind(s), lg2 = groups[catOf(s)];
+    const s = g.lead, { x, y, merged: mg } = g, sel = s.id === hl(), wo = s.type === "wind", wx = s.type === "weather", wind = hasWind(s), lg2 = groups[catOf(s)];
     const bad = s.bad[wo ? "wg" : wx ? "lt" : "hs"];
     const val = bad ? badText(bad) : wo ? (s.wg == null ? "–" : Math.round(s.wg) + " km/h") : wx ? (s.lt == null ? "–" : s.lt + " °C") : s.hs == null ? "–" : Math.round(s.hs) + " cm";
     // direction + offset: beside the dot first, then the four diagonals, then below and above
@@ -375,7 +377,7 @@ function renderMap() {
     el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } });
     if (s.id === focusId) focusEl = el;
   }
-  for (const s of loose) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, s.id === state.selected && vis(s) ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
+  for (const s of loose) L.marker([s.lat, s.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, s.id === hl() && vis(s) ? 36 : 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (s.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
   for (const lm of landmarks) if (lm.pk && peakOn(lm) && !lm.name.startsWith("Valluga")) { // peaks last: only where they clear every dot, label and control
     const box = place(lm);
     if (costAgainst(taken, box) > 0) map.removeLayer(lm.marker); else taken.push(box);

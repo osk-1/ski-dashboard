@@ -16,7 +16,7 @@ for (const mode of ["css", "api"]) for (const vp of VIEWPORTS) for (const scheme
     await expect(page.locator('button[aria-label="Reset view"] circle')).toHaveCount(1); // crosshair, not the four-corners icon
     await expect(btn.locator("circle")).toHaveCount(0);
     await expect(btn).toHaveAttribute("aria-pressed", "false");
-    await page.evaluate(() => window.scrollTo(0, 120)); const y0 = await page.evaluate(() => scrollY);
+    await page.evaluate(() => window.scrollTo(0, 120)); await btn.scrollIntoViewIfNeeded(); const y0 = await page.evaluate(() => scrollY);
     expect(await page.evaluate(() => map.dragging.enabled())).toBe(false);
 
     const enter = async () => { await btn.click(); await expect(btn).toHaveAttribute("aria-pressed", "true"); await settle(page); };

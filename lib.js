@@ -99,6 +99,8 @@ const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d /
 // hours of `field` in [from, to] that have a value and are not flagged for this station; hr (HS rise) is clamped at 0 like risePts
 const okPts = (hours, field, id, from, to) => slice(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
 const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length, of: slice(hours, field, id, from, to).length }; }; // of = hours in the window
+// new snow = HS rise above the running maximum (high-water mark) of the unflagged hs values: jitter and settling add nothing, gaps keep the mark
+const riseOf = (hours, id, from, to) => { let m = null, v = 0; const pts = okPts(hours, "hs", id, from, to); for (const p of pts) { if (m != null && p.y > m) v += p.y - m; m = m == null ? p.y : Math.max(m, p.y); } return { v, n: pts.length, of: slice(hours, "hs", id, from, to).length }; };
 const extremeOf = (hours, field, id, from, to, max) => okPts(hours, field, id, from, to).reduce((a, p) => !a || (max ? p.y > a.y : p.y < a.y) ? p : a, null);
 const r1 = v => v == null ? null : Math.round(v * 10) / 10;
 // per band: n = stations with any data; each metric is the median over the stations that have it (null when none), with its own station count (…N)
@@ -108,7 +110,7 @@ const bandStats = (stations, hours, now, h) => {
   for (const [b] of BANDS) {
     const st = stations.filter(s => bandOf(s.alt) === b), has = id => Object.values(hours).some(x => x.hs?.[id] != null);
     const per = st.map(s => {
-      const hs = has(s.id), a = hs ? sumField(hours, "hr", s.id, ...past) : { n: 0 }, c = hs ? sumField(hours, "sm", s.id, ...next) : { n: 0 };
+      const hs = has(s.id), a = hs ? riseOf(hours, s.id, ...past) : { n: 0 }, c = hs ? sumField(hours, "sm", s.id, ...next) : { n: 0 };
       const lo = extremeOf(hours, "lt", s.id, ...past, false), hi = extremeOf(hours, "lt", s.id, ...past, true);
       return { snowLast: a.n ? a.v : null, snowNext: c.n ? c.v : null, tmin: lo?.y ?? null, tmax: hi?.y ?? null, snowLastH: a.n || null, snowNextH: c.n || null };
     });
@@ -123,4 +125,4 @@ const strongestGust = (hours, stations, now, h) => stations.reduce((a, s) => {
   const e = extremeOf(hours, "wg_boe", s.id, now - h * H + 1, now, true);
   return e && (!a || e.y > a.y) ? { y: e.y, id: s.id, k: e.k, wr: hours[e.k]?.wr?.[s.id] ?? null } : a;
 }, null);
-if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, extremeOf, bandStats, strongestGust };
+if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust };
