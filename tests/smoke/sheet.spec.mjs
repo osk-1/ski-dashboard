@@ -32,7 +32,7 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     const card = page.locator("#stationCard"); await expect(card).toBeVisible(); await expect(card).toBeFocused();
     await expect(page.locator("#map .val.sel")).toHaveCount(1);
     await expect(card.locator(".scr small").first()).toHaveText(/^24 h: min -?\d+.* · max -?\d+/);
-    await expect(page.locator("#glance")).toBeHidden(); await expect(page.locator("#stnSel")).toHaveValue("SKAP2"); // the card replaces the overview; the charts follow
+    await expect(page.locator("#summary")).toBeHidden(); await expect(page.locator("#tableDetails")).toBeHidden(); await expect(page.locator("#glance")).toBeHidden(); await expect(page.locator("#stnSel")).toHaveValue("SKAP2"); // the card replaces the overview; the charts follow
     expect(await hit(page, 100)).toBe("map");
     await shot(page, "sheet-card", vp, scheme);
     await page.keyboard.press("Escape"); await expect(card).toBeHidden();
