@@ -5,13 +5,14 @@ import { open, VIEWPORTS } from "./helpers.mjs";
 
 const tipOpacity = (page, id) => page.evaluate((i) => Chart.getChart(i).tooltip.opacity, id);
 // tap the first measured point (dataset 0) from index 10 on; the fixtures have gaps with a real touch tap
-async function tap(page, id) {
+async function tap(page, id, off = false) {
   await page.locator(`#${id}`).scrollIntoViewIfNeeded();
   await page.waitForTimeout(300); // let charts resize after the scroll / station change
   const p = await page.evaluate((i) => { const c = Chart.getChart(i), m = c.getDatasetMeta(0).data.find((e, j) => j >= 10 && c.data.datasets[0].data[j].y != null), r = c.canvas.getBoundingClientRect(); return { x: r.left + m.x, y: r.top + m.y }; }, id);
   await page.touchscreen.tap(p.x, p.y);
   await page.waitForTimeout(600);
-  expect(await tipOpacity(page, id)).toBe(1);
+  expect(await tipOpacity(page, id)).toBe(off ? 0 : 1);
+  if (off) return;
   return page.evaluate((i) => Chart.getChart(i).tooltip.body.flatMap((b) => b.lines).join("|") + "|" + Chart.getChart(i).tooltip.afterBody.join("|") + "|" + Chart.getChart(i).tooltip.footer.join("|") + "|" + Chart.getChart(i).tooltip.title.join("|"), id);
 }
 
@@ -37,6 +38,8 @@ for (const vp of VIEWPORTS) {
       expect(t).toContain("measured");
       expect(t).toContain("km/h");
       expect(t).toContain("Wind from");
+      await tap(page, "wind", true); // tapping the same point again toggles it off
+      await tap(page, "wind");
       await page.touchscreen.tap(vp.width / 2, 8);
       await expect.poll(() => tipOpacity(page, "wind")).toBe(0);
       await page.locator("#windPanel").screenshot({ path: `test-results/screens/wind-24h-${vp.name}-${scheme}.png` });
