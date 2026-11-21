@@ -98,27 +98,29 @@ const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b)
 const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8];
 // hours of `field` in [from, to] that have a value and are not flagged for this station; hr (HS rise) is clamped at 0 like risePts
 const okPts = (hours, field, id, from, to) => slice(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
-const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length }; };
+const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length, of: slice(hours, field, id, from, to).length }; }; // of = hours in the window
 const extremeOf = (hours, field, id, from, to, max) => okPts(hours, field, id, from, to).reduce((a, p) => !a || (max ? p.y > a.y : p.y < a.y) ? p : a, null);
 const r1 = v => v == null ? null : Math.round(v * 10) / 10;
-// per band: n = stations with any data; medians over the stations that have the metric (null when none)
+// per band: n = stations with any data; each metric is the median over the stations that have it (null when none), with its own station count (…N)
+// and, for snow, the median hours with data (…H) out of the window's hours (of): less than `of` means a partial total. Windows are (now-h, now] and (now, now+h].
 const bandStats = (stations, hours, now, h) => {
-  const out = {}, past = [now - h * H, now], next = [now + 1, now + h * H];
+  const out = {}, past = [now - h * H + 1, now], next = [now + 1, now + h * H];
   for (const [b] of BANDS) {
     const st = stations.filter(s => bandOf(s.alt) === b), has = id => Object.values(hours).some(x => x.hs?.[id] != null);
     const per = st.map(s => {
       const hs = has(s.id), a = hs ? sumField(hours, "hr", s.id, ...past) : { n: 0 }, c = hs ? sumField(hours, "sm", s.id, ...next) : { n: 0 };
       const lo = extremeOf(hours, "lt", s.id, ...past, false), hi = extremeOf(hours, "lt", s.id, ...past, true);
-      return { snowLast: a.n ? a.v : null, snowNext: c.n ? c.v : null, tmin: lo?.y ?? null, tmax: hi?.y ?? null };
+      return { snowLast: a.n ? a.v : null, snowNext: c.n ? c.v : null, tmin: lo?.y ?? null, tmax: hi?.y ?? null, snowLastH: a.n || null, snowNextH: c.n || null };
     });
-    out[b] = { n: per.filter(p => Object.values(p).some(v => v != null)).length };
-    for (const f of ["snowLast", "snowNext", "tmin", "tmax"]) out[b][f] = r1(median(per.map(p => p[f])));
+    out[b] = { n: per.filter(p => ["snowLast", "snowNext", "tmin", "tmax"].some(f => p[f] != null)).length, of: h };
+    for (const f of ["snowLast", "snowNext", "tmin", "tmax"]) { out[b][f] = r1(median(per.map(p => p[f]))); out[b][f + "N"] = per.filter(p => p[f] != null).length; }
+    for (const f of ["snowLastH", "snowNextH"]) out[b][f] = median(per.map(p => p[f])) == null ? null : Math.round(median(per.map(p => p[f])));
   }
   return out;
 };
 // strongest gust (wg_boe) over the stations and the past window, with its direction; first station wins a tie
 const strongestGust = (hours, stations, now, h) => stations.reduce((a, s) => {
-  const e = extremeOf(hours, "wg_boe", s.id, now - h * H, now, true);
+  const e = extremeOf(hours, "wg_boe", s.id, now - h * H + 1, now, true);
   return e && (!a || e.y > a.y) ? { y: e.y, id: s.id, k: e.k, wr: hours[e.k]?.wr?.[s.id] ?? null } : a;
 }, null);
 if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, extremeOf, bandStats, strongestGust };

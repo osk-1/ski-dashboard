@@ -41,13 +41,14 @@ function renderSummary() {
   const note = left.length ? `<p class="src xl">Not current or suspect: ${left.join(" · ")}.</p>` : "";
   const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
   const deep = s.length ? s.reduce((a, b) => b.hs > a.hs ? b : a) : null;
-  const g = strongestGust(hours, sh, now, sumH), gs = g && sh.find(x => x.id === g.id);
-  const t = v => v == null ? "–" : v;
-  const bs = bandStats(sh, hours, now, sumH), src = state.hourly?.model?.source || "source unknown";
+  // every placed station of any type, independent of the map layers; hourly flags are limit checks only, so a station whose gust is flagged now (frozen, stuck) is left out of the gust
+  const all = placed(), bs = bandStats(all, hours, now, sumH), src = state.hourly?.model?.source || "source unknown";
+  const t = v => v == null ? "–" : v, g = strongestGust(hours, all.filter(x => !x.flags?.wg_boe && !x.flags?.wg), now, sumH), gs = g && all.find(x => x.id === g.id);
+  const cov = (hh, of, n, all) => `${hh != null && hh < of ? ` · ${hh} of ${of} h` : ""}${n && n !== all ? ` · n=${n}` : ""}`;
   const cards = BANDS.filter(([k]) => bs[k].n > 0).map(([k, name, rng]) => { const r = bs[k]; return `<div class="stat band"><h3>${name} (${rng}) · ${r.n} station${r.n > 1 ? "s" : ""} <small>n=${r.n}, median</small></h3>
-    <div><b${r.snowLast == null ? ' title="No data in this window"' : ""}>${r.snowLast == null ? "–" : `+${r.snowLast} cm`}</b><span>New snow last ${sumH} h, measured</span></div>
-    <div><b${r.snowNext == null ? ' title="No forecast for these stations"' : ""}>${r.snowNext == null ? "–" : `+${r.snowNext} cm`}</b><span>Next ${sumH} h, model · ${esc(src)}</span></div>
-    <div><b${r.tmin == null ? ' title="No data in this window"' : ""}>${t(r.tmin)} / ${t(r.tmax)} °C</b><span>Min / max last ${sumH} h, measured</span></div></div>`; }).join("");
+    <div><b${r.snowLast == null ? ' title="No data in this window"' : ""}>${r.snowLast == null ? "–" : `+${r.snowLast} cm`}</b><span>New snow last ${sumH} h, measured${cov(r.snowLastH, r.of, r.snowLastN, r.n)}</span></div>
+    <div><b${r.snowNext == null ? ' title="No forecast for these stations"' : ""}>${r.snowNext == null ? "–" : `+${r.snowNext} cm`}</b><span>Next ${sumH} h, model · ${esc(src)}${cov(r.snowNextH, r.of, r.snowNextN, r.n)}</span></div>
+    <div><b${r.tmin == null ? ' title="No data in this window"' : ""}>${t(r.tmin)} / ${t(r.tmax)} °C</b><span>Min / max last ${sumH} h, measured${cov(null, 0, r.tminN, r.n)}</span></div></div>`; }).join("");
   el.innerHTML = stat(deep ? `${Math.round(deep.hs)} cm` : "–", deep ? `Deepest · ${esc(deep.name)}` : "Deepest station")
     + (g ? stat(`${Math.round(g.y)} km/h`, `Strongest gust, last ${sumH} h · ${esc(gs?.name ?? g.id)} · ${g.wr == null ? "direction unknown" : `<span style="display:inline-block;transform:rotate(${(g.wr + 180) % 360}deg)" aria-hidden="true">↑</span> from ${compass(g.wr)}`} · ${fmtSlot(keyMs(g.k))}`)
       : `<div class="stat"><b title="No data in this window">–</b><span>Strongest gust, last ${sumH} h</span></div>`)

@@ -158,23 +158,30 @@ const HR = { "2026-11-20T10": { hr: { A: 1 }, lt: { A: -3 }, wg_boe: { A: 40, B:
   "2026-11-20T12": { hr: { A: 4 }, lt: { A: 0 }, wg_boe: { A: 99 }, flags: { A: { hr: "x", wg_boe: "x" } } }, "2026-11-20T13": { hr: { A: 2 }, sm: { A: 5 }, hs: { A: 1 } }, "2026-11-20T14": { sm: { A: 1.5 }, hs: { A: 1 } } };
 const TK = h => keyMs("2026-11-20T" + h);
 test("sumField / extremeOf: flagged and null hours skipped, hr never negative", () => {
-  assert.deepEqual(sumField(HR, "hr", "A", TK("10"), TK("13")), { v: 3, n: 3 }); // 1 + max(0,-2) + (flagged 12 skipped) + 2
-  assert.deepEqual(sumField(HR, "hr", "B", TK("10"), TK("13")), { v: 0, n: 0 });
+  assert.deepEqual(sumField(HR, "hr", "A", TK("10"), TK("13")), { v: 3, n: 3, of: 4 }); // 1 + max(0,-2) + (flagged 12 skipped) + 2
+  assert.deepEqual(sumField(HR, "hr", "B", TK("10"), TK("13")), { v: 0, n: 0, of: 4 });
   assert.deepEqual(extremeOf(HR, "lt", "A", TK("10"), TK("13"), true), { x: TK("12"), y: 0, k: "2026-11-20T12" });
   assert.equal(extremeOf(HR, "lt", "A", TK("10"), TK("13"), false).y, -3);
   assert.equal(extremeOf(HR, "lt", "B", TK("10"), TK("13"), true), null);
   assert.equal(extremeOf(HR, "wg_boe", "A", TK("10"), TK("13"), true).y, 40); // 99 is flagged
 });
 test("strongestGust: ties go to the first station, flagged skipped, empty null", () => {
-  assert.deepEqual(strongestGust(HR, [{ id: "A" }, { id: "B" }], TK("13"), 3), { y: 40, id: "A", k: "2026-11-20T10", wr: 90 });
-  assert.equal(strongestGust(HR, [{ id: "B" }, { id: "A" }], TK("13"), 3).id, "B");
+  assert.deepEqual(strongestGust(HR, [{ id: "A" }, { id: "B" }], TK("13"), 4), { y: 40, id: "A", k: "2026-11-20T10", wr: 90 });
+  assert.equal(strongestGust(HR, [{ id: "B" }, { id: "A" }], TK("13"), 4).id, "B");
   assert.equal(strongestGust(HR, [], TK("13"), 3), null);
   assert.equal(strongestGust(HR, [{ id: "Z" }], TK("13"), 3), null);
 });
-test("bandStats: medians per band, metrics without data are null, empty band n=0", () => {
+test("past window is (now-h, now]: h hours, not h+1", () => {
+  const h = { "2026-11-20T12": { hr: { A: 1 } }, "2026-11-20T13": { hr: { A: 2 } }, "2026-11-20T14": { hr: { A: 4 }, hs: { A: 1 }, wg_boe: { A: 9 } }, "2026-11-20T11": { wg_boe: { A: 50 } } };
+  const r = bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 1);
+  assert.equal(r.mid.snowLast, 4); // only the 14 h rise, not 13 h + 14 h
+  assert.equal(bandStats([{ id: "A", alt: 1700 }], h, TK("14"), 2).mid.snowLast, 6);
+  assert.equal(strongestGust(h, [{ id: "A" }], TK("14"), 3).y, 9); // 11 h is outside (14-3, 14]
+});
+test("bandStats: medians per band, per-metric counts, partial coverage, empty band", () => {
   const st = [{ id: "A", alt: 1700 }, { id: "B", alt: 1800 }, { id: "Z", alt: 2500 }];
-  const r = bandStats(st, HR, TK("13"), 3);
-  assert.deepEqual(r.mid, { n: 1, snowLast: 3, snowNext: 1.5, tmin: -3, tmax: 0 }); // B has no data; next = hours after now only (14 h)
-  assert.deepEqual(r.valley, { n: 0, snowLast: null, snowNext: null, tmin: null, tmax: null });
-  assert.equal(r.high.n, 0);
+  const r = bandStats(st, HR, TK("13"), 3); // past (10, 13]: 11, 12 (flagged hr), 13; next (13, 16]: 14
+  assert.deepEqual(r.mid, { n: 1, of: 3, snowLast: 2, snowNext: 1.5, tmin: -1, tmax: 0, snowLastN: 1, snowNextN: 1, tminN: 1, tmaxN: 1, snowLastH: 2, snowNextH: 1 }); // 2 of 3 hours measured, 1 of 3 forecast: partial
+  assert.equal(r.valley.n, 0); assert.equal(r.valley.snowLast, null); assert.equal(r.high.n, 0);
+  assert.equal(sumField(HR, "hr", "A", TK("10"), TK("13")).of, 4);
 });

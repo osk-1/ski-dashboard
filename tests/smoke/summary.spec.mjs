@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
 
-const stations = JSON.parse(readFileSync(new URL("../fixtures/data/stations.json", import.meta.url))).stations.filter((s) => !s.flags?.station && s.type !== "wind"); // the wind layer is off by default
+const stations = JSON.parse(readFileSync(new URL("../fixtures/data/stations.json", import.meta.url))).stations.filter((s) => !s.flags?.station);
 const hourly = JSON.parse(readFileSync(new URL("../fixtures/data/hourly.json", import.meta.url))).hours;
 const past = Object.keys(hourly).filter((k) => k >= "2026-11-19T17" && k <= "2026-11-20T16"), next = Object.keys(hourly).filter((k) => k > "2026-11-20T16" && k <= "2026-11-21T16");
 const hasHs = (id) => Object.values(hourly).some((h) => h.hs?.[id] != null);
@@ -29,11 +29,13 @@ for (const vp of VIEWPORTS) {
       await expect(sum).toContainText("New snow last 24 h, measured");
       await expect(sum).toContainText("Next 24 h, model · Open-Meteo");
       await expect(sum).toContainText(/Strongest gust, last 24 h · \S.* · .*from [NSEW]/);
+      await expect(sum.locator(".band", { hasText: "High (" })).toHaveCount(1); // wind-only stations count although the Wind layer is off
       const text24 = await sum.innerText();
       await shot(page, "summary-24h", vp, scheme);
 
       await page.click("#sumWin button[data-h='168']");
       await expect(sum).toContainText("New snow last 168 h, measured");
+      await expect(sum).toContainText(/measured · \d+ of 168 h/); // a station with fewer hourly rises than the window is marked partial
       expect(await sum.innerText()).not.toBe(text24);
       await shot(page, "summary-7d", vp, scheme);
       await page.reload();
