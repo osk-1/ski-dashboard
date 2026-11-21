@@ -8,7 +8,7 @@ const fixture = (name) => JSON.parse(readFileSync(new URL(`../fixtures/data/${na
 const VIEWPORTS = [{ name: "390", width: 390, height: 844 }, { name: "430", width: 430, height: 932 }];
 
 function data() {
-  const d = Object.fromEntries(["stations", "forecast", "readings", "danger", "regions", "hourly", "health"].map((n) => [n, fixture(n)]));
+  const d = Object.fromEntries(["stations", "danger", "regions", "hourly", "health"].map((n) => [n, fixture(n)]));
   const st = (id) => d.stations.stations.find((s) => s.id === id);
   st("VOR-ZURS1").date = "2026-11-20T13:35:00+01:00"; // 3 h before the run: wind stale, HS still fresh
   st("KSIN2").date = "2026-11-20T09:35:00+01:00"; // 7 h: HS and its 24 h change stale
@@ -114,7 +114,7 @@ for (const vp of VIEWPORTS) {
 }
 
 test("works without health.json", async ({ browser }) => {
-  const d = Object.fromEntries(["stations", "forecast", "readings", "danger", "regions", "hourly"].map((n) => [n, fixture(n)]));
+  const d = Object.fromEntries(["stations", "danger", "regions", "hourly"].map((n) => [n, fixture(n)]));
   const { page, context, problems } = await open(browser, VIEWPORTS[0], "light", d);
   await expect(page.locator("#banner")).toBeHidden(); // stations.json updated is "now"
   await expect(page.locator("#checkList")).toContainText("Source status unavailable");

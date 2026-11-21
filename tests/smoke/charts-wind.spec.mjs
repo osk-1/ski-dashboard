@@ -32,6 +32,8 @@ for (const vp of VIEWPORTS) {
       expect(arrows.n).toBeGreaterThan(0);
       expect(arrows.n).toBeLessThanOrEqual(41);
       expect(await page.evaluate(() => Chart.getChart("wind").config.plugins.map((p) => p.id))).toContain("zone");
+      await expect(page.locator("#windNote")).toContainText("MET Norway"); // wind comes from the fixture's fallback run
+      await expect(page.locator("#windNote")).not.toContainText("Open-Meteo");
 
       // tap tooltip persists, names value / time / measured / source; the page header clears it
       const t = await tap(page, "wind");

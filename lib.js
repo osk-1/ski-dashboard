@@ -32,7 +32,7 @@ const latest = (hours, field, id, to) => { const lim = viennaKey(to), k = Object
 const WINDOWS = [1, 6, 12, 24, 48, 72, 168];
 const winOr = (v, def) => WINDOWS.includes(v) ? v : def;
 const tickStepH = h => ({ 6: 2, 12: 4, 24: 12, 48: 24, 72: 24, 168: 24 })[h];
-// new snow: hourly HS rise, never negative (settling); gaps stay null
+// chart bars: hourly HS rise, never negative (settling); gaps stay null. The summary's "new snow" is riseOf, not a sum of these
 const risePts = (hours, id, from, to) => slice(hours, "hr", id, from, to).map(p => ({ ...p, y: p.y == null ? null : Math.max(0, p.y) }));
 // change of a field over the last backH hours: { now, then, d } from the newest values at or before each instant; null if either is missing or both resolve to the same hour (no real comparison)
 const delta = (hours, field, id, now, backH) => {
@@ -96,12 +96,15 @@ const bandOf = alt => alt < 1600 ? "valley" : alt <= 2200 ? "mid" : "high";
 const BANDS = [["valley", "Valley", "< 1,600 m"], ["mid", "Mid", "1,600-2,200 m"], ["high", "High", "> 2,200 m"]];
 const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b), m = v.length >> 1; return v.length ? (v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2) : null; };
 const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8];
-// hours of `field` in [from, to] that have a value and are not flagged for this station; hr (HS rise) is clamped at 0 like risePts
-const okPts = (hours, field, id, from, to) => slice(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
-const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length, of: slice(hours, field, id, from, to).length }; }; // of = hours in the window
+// one point per hour key: the repeated 02:00 of the autumn DST change is one hour of data, not two
+const hourPts = (hours, field, id, from, to) => { const s = slice(hours, field, id, from, to); return s.filter((p, i) => s.findIndex(q => q.k === p.k) === i); };
+// hours of `field` in [from, to] that have a value and are not flagged for this station
+const okPts = (hours, field, id, from, to) => hourPts(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
+// hr (HS rise) is clamped at 0 like risePts; of = hours in the window
+const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length, of: hourPts(hours, field, id, from, to).length }; };
 // new snow = HS rise above the running maximum (high-water mark) of the unflagged hs values: jitter and settling add nothing, gaps keep the mark.
 // The mark starts at the hour before the window's first hour (the boundary), so the rise from there counts; without a usable boundary it starts at the first in-window value.
-const riseOf = (hours, id, from, to) => { const first = Math.ceil(from / H) * H, b = okPts(hours, "hs", id, first - H, first - H)[0]; let m = b ? b.y : null, v = 0; const pts = okPts(hours, "hs", id, from, to); for (const p of pts) { if (m != null && p.y > m) v += p.y - m; m = m == null ? p.y : Math.max(m, p.y); } return { v, n: pts.length, of: slice(hours, "hs", id, from, to).length }; };
+const riseOf = (hours, id, from, to) => { const first = Math.ceil(from / H) * H, b = okPts(hours, "hs", id, first - H, first - H)[0]; let m = b ? b.y : null, v = 0; const pts = okPts(hours, "hs", id, from, to); for (const p of pts) { if (m != null && p.y > m) v += p.y - m; m = m == null ? p.y : Math.max(m, p.y); } return { v, n: pts.length, of: hourPts(hours, "hs", id, from, to).length }; };
 const extremeOf = (hours, field, id, from, to, max) => okPts(hours, field, id, from, to).reduce((a, p) => !a || (max ? p.y > a.y : p.y < a.y) ? p : a, null);
 const r1 = v => v == null ? null : Math.round(v * 10) / 10;
 // per band: n = stations with any data; each metric is the median over the stations that have it (null when none), with its own station count (…N)

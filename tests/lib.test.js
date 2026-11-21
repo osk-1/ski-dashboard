@@ -210,3 +210,14 @@ test("bandStats: medians per band, per-metric counts, partial coverage, empty ba
   assert.equal(r.valley.n, 0); assert.equal(r.valley.snowLast, null); assert.equal(r.high.n, 0);
   assert.equal(sumField(HR, "hr", "A", TK("10"), TK("13")).of, 4);
 });
+test("bandStats: even number of stations in a band -> median is the mean of the middle two", () => {
+  const h = { "2026-11-20T13": { hs: { A: 50, B: 50 } }, "2026-11-20T14": { hs: { A: 51, B: 54 }, lt: { A: -1, B: -5 } } };
+  const r = bandStats([{ id: "A", alt: 1700 }, { id: "B", alt: 1800 }], h, TK("14"), 1);
+  assert.deepEqual([r.mid.snowLast, r.mid.snowLastN, r.mid.tmin, r.mid.tminN], [2.5, 2, -3, 2]); // (1 + 4) / 2, (-1 + -5) / 2
+});
+test("sumField / riseOf: the repeated 02:00 of the autumn DST change counts once (hour keys can repeat)", () => {
+  const from = Date.UTC(2026, 9, 25, 0, 0), to = Date.UTC(2026, 9, 25, 2, 0); // 02:00 CEST, 02:00 CET, 03:00 CET
+  assert.equal(viennaKey(from), viennaKey(from + 3600e3)); // two instants, one key
+  const h = { "2026-10-25T02": { sm: { A: 2 } }, "2026-10-25T03": { sm: { A: 1 } } };
+  assert.deepEqual(sumField(h, "sm", "A", from, to), { v: 3, n: 2, of: 2 });
+});

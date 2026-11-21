@@ -45,6 +45,12 @@ for (const vp of VIEWPORTS) {
       await page.click("#tbl th[data-k=wg] button");
       await expect(page.locator("#rows tr[aria-selected=true]")).toHaveAttribute("data-id", sel);
 
+      // the change column follows the window: 72 h values differ from the 24 h ones (the fixture covers 7 days)
+      const d24 = await col(page, 4);
+      await page.selectOption("#chgSel", "72");
+      await expect(page.locator("#chgHead")).toHaveText("Δ HS 72 h");
+      expect(await col(page, 4)).not.toEqual(d24);
+
       // change window persists and relabels
       await page.selectOption("#chgSel", "168");
       await expect(page.locator("#chgHead")).toHaveText("Δ HS 7 d");

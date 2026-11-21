@@ -7,7 +7,7 @@ const fixture = (name) => readFileSync(new URL(`../fixtures/data/${name}.json`, 
 // iPhone 13 / 13 Pro Max widths
 export const VIEWPORTS = [{ name: "390", width: 390, height: 844 }, { name: "430", width: 430, height: 932 }];
 
-// overrides: { storage: {key: value} seeded into localStorage, fixtures: {name: Buffer|string} replacing a data file }
+// overrides: { storage: {key: value} seeded into localStorage, fixtures: {name: Buffer|string} replacing a data file, null = 404 }
 // Returns { page, context, problems }; problems collects console errors and page exceptions.
 export async function open(browser, vp, scheme, overrides = {}) {
   const context = await browser.newContext({ viewport: vp, colorScheme: scheme, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
@@ -17,6 +17,7 @@ export async function open(browser, vp, scheme, overrides = {}) {
   page.on("pageerror", (e) => problems.push(`exception: ${e.message}`));
   await page.route("**/data/*.json", (route) => {
     const name = new URL(route.request().url()).pathname.match(/(\w+)\.json$/)[1];
+    if (overrides.fixtures?.[name] === null) return route.fulfill({ status: 404, body: "" }); // a data file that is missing
     return route.fulfill({ contentType: "application/json", body: overrides.fixtures?.[name] ?? fixture(name) });
   });
   await page.route(/^https?:\/\/(?!127\.0\.0\.1|cdnjs\.cloudflare\.com)/, (route) => {

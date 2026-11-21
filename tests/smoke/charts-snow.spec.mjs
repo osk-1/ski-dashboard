@@ -12,7 +12,8 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#updated")).toContainText("stations");
       await expect(page.locator("#hist, #fc")).toHaveCount(0);
       await expect(page.locator("#snowWin button[data-h='72']")).toHaveAttribute("aria-pressed", "true"); // default
-      await expect(page.locator("#snowNote")).toContainText("Open-Meteo");
+      await expect(page.locator("#snowNote")).toContainText("Open-Meteo"); // sd/sm keep their own source after the fixture's MET Norway fallback run
+      await expect(page.locator("#snowNote")).not.toContainText("MET Norway");
       await expect.poll(() => page.evaluate(() => !!Chart.getChart("snow"))).toBe(true);
       const d = await sets(page);
       expect(d.find((x) => x.dash)?.label).toContain("model"); // dashed forecast depth
