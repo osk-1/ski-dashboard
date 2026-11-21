@@ -74,7 +74,7 @@ for (const vp of VIEWPORTS) {
       await page.evaluate(() => map.setView([47.1099, 10.2776], fitZ + 4, { animate: false })); // the fitted map shows no value labels (#39), and the long suspect text needs room: zoom in
       await expect(page.locator(".leaflet-tooltip.val", { hasText: "Gampberg Windstation" })).toContainText("suspect: sensor frozen?");
       await expect(page.locator("#summary")).toContainText("Gampberg Windstation (wind, gusts, wind direction: suspect: sensor frozen?)");
-      await expect(page.locator("#summary")).toContainText("2 excluded"); // Ulmerhütte HS offline, Kappl Sinsenergampen stale
+      await expect(page.locator("#summary")).toContainText("Ulmerhütte"); // HS offline stays listed in the not-current note
       await expect(page.locator('#rows tr[data-id="SAGA1"] .why')).toHaveText("suspect: sensor frozen?");
       await shot(page.locator("#tableDetails"), "table");
 

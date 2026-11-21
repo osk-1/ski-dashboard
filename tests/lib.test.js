@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale } = require("../lib.js");
+const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, extremeOf, bandStats, strongestGust } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -144,4 +144,37 @@ test("delta: change over backH, null when either end is missing", () => {
   assert.equal(delta(h, "hs", "A", keyMs("2026-11-20T13"), 6), null);
   assert.equal(delta(h, "hs", "A", keyMs("2026-11-20T20"), 1), null); // newest value 7 h old: both ends are the same hour, not a 0 change
   assert.equal(delta(h, "hs", "B", keyMs("2026-11-20T13"), 1), null);
+});
+
+test("bandOf / BANDS", () => {
+  assert.deepEqual([1599, 1600, 2200, 2201].map(bandOf), ["valley", "mid", "mid", "high"]);
+  assert.equal(BANDS.length, 3);
+});
+test("median / compass", () => {
+  assert.equal(median([]), null); assert.equal(median([null]), null); assert.equal(median([3, null, 1, 2]), 2); assert.equal(median([4, 1, 2, 3]), 2.5);
+  assert.deepEqual([0, 44, 90, 350].map(compass), ["N", "NE", "E", "N"]);
+});
+const HR = { "2026-11-20T10": { hr: { A: 1 }, lt: { A: -3 }, wg_boe: { A: 40, B: 40 }, wr: { A: 90, B: 180 } }, "2026-11-20T11": { hr: { A: -2 }, lt: { A: -1 }, wg_boe: { A: 30 } },
+  "2026-11-20T12": { hr: { A: 4 }, lt: { A: 0 }, wg_boe: { A: 99 }, flags: { A: { hr: "x", wg_boe: "x" } } }, "2026-11-20T13": { hr: { A: 2 }, sm: { A: 5 }, hs: { A: 1 } }, "2026-11-20T14": { sm: { A: 1.5 }, hs: { A: 1 } } };
+const TK = h => keyMs("2026-11-20T" + h);
+test("sumField / extremeOf: flagged and null hours skipped, hr never negative", () => {
+  assert.deepEqual(sumField(HR, "hr", "A", TK("10"), TK("13")), { v: 3, n: 3 }); // 1 + max(0,-2) + (flagged 12 skipped) + 2
+  assert.deepEqual(sumField(HR, "hr", "B", TK("10"), TK("13")), { v: 0, n: 0 });
+  assert.deepEqual(extremeOf(HR, "lt", "A", TK("10"), TK("13"), true), { x: TK("12"), y: 0, k: "2026-11-20T12" });
+  assert.equal(extremeOf(HR, "lt", "A", TK("10"), TK("13"), false).y, -3);
+  assert.equal(extremeOf(HR, "lt", "B", TK("10"), TK("13"), true), null);
+  assert.equal(extremeOf(HR, "wg_boe", "A", TK("10"), TK("13"), true).y, 40); // 99 is flagged
+});
+test("strongestGust: ties go to the first station, flagged skipped, empty null", () => {
+  assert.deepEqual(strongestGust(HR, [{ id: "A" }, { id: "B" }], TK("13"), 3), { y: 40, id: "A", k: "2026-11-20T10", wr: 90 });
+  assert.equal(strongestGust(HR, [{ id: "B" }, { id: "A" }], TK("13"), 3).id, "B");
+  assert.equal(strongestGust(HR, [], TK("13"), 3), null);
+  assert.equal(strongestGust(HR, [{ id: "Z" }], TK("13"), 3), null);
+});
+test("bandStats: medians per band, metrics without data are null, empty band n=0", () => {
+  const st = [{ id: "A", alt: 1700 }, { id: "B", alt: 1800 }, { id: "Z", alt: 2500 }];
+  const r = bandStats(st, HR, TK("13"), 3);
+  assert.deepEqual(r.mid, { n: 1, snowLast: 3, snowNext: 1.5, tmin: -3, tmax: 0 }); // B has no data; next = hours after now only (14 h)
+  assert.deepEqual(r.valley, { n: 0, snowLast: null, snowNext: null, tmin: null, tmax: null });
+  assert.equal(r.high.n, 0);
 });

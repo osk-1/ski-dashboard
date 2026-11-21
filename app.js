@@ -32,23 +32,33 @@ const isBad = v => !v.ok && !v.missing;
 const group = (xs, key) => xs.reduce((o, x) => ((o[key(x)] ??= []).push(x), o), Object.create(null)); // Object.groupBy needs Safari 17.4
 const badList = bad => Object.entries(group(Object.entries(bad), ([, v]) => badText(v))).map(([t, fs]) => `${fs.map(([f]) => FN[f]).join(", ")}: ${t}`).join("; ");
 
+let sumH = 24; // summary window in hours (key sumH)
+try { sumH = winOr(+localStorage.getItem("sumH"), 24); } catch {}
 function renderSummary() {
-  const sh = shown(), s = sh.filter(x => x.hs != null), ex = sh.filter(x => x.bad.hs).length;
+  const sh = shown(), s = sh.filter(x => x.hs != null), hours = state.hourly?.hours || {}, now = anchorMs(hours, Date.now()), el = document.getElementById("sumBody");
+  for (const b of document.getElementById("sumWin").children) b.setAttribute("aria-pressed", +b.dataset.h === sumH);
   const left = sh.filter(x => Object.keys(x.bad).length).map(x => `${esc(x.name)} (${esc(badList(x.bad))})`);
   const note = left.length ? `<p class="src xl">Not current or suspect: ${left.join(" · ")}.</p>` : "";
-  if (!s.length) { document.getElementById("summary").innerHTML = '<div class="stat"><b>–</b><span>No snow stations shown</span></div>' + note; return; }
-  const deep = s.reduce((a, b) => b.hs > a.hs ? b : a);
-  const avg = s.reduce((a, b) => a + b.hs, 0) / s.length;
-  const ds = s.map(x => delta24(x.id)).filter(x => x != null);
-  const dAvg = ds.length ? Math.round(ds.reduce((a, b) => a + b, 0) / ds.length) : null;
-  const fcSum = null; // 5-day forecast.json no longer loaded; the summary strip is rebuilt on hourly model data in a later task
-  document.getElementById("summary").innerHTML = [
-    [`${Math.round(deep.hs)} cm`, `Deepest · ${esc(deep.name)}`],
-    [`${Math.round(avg)} cm`, `Average of ${s.length}${ex ? ` · ${ex} excluded` : " stations"}`],
-    [dAvg == null ? "–" : `${dAvg > 0 ? "+" : ""}${dAvg} cm`, "Avg change 24 h"],
-    [fcSum == null ? "–" : `${fcSum} cm`, "Model new snow, 5 days"],
-  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("") + note;
+  const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+  const deep = s.length ? s.reduce((a, b) => b.hs > a.hs ? b : a) : null;
+  const g = strongestGust(hours, sh, now, sumH), gs = g && sh.find(x => x.id === g.id);
+  const t = v => v == null ? "–" : v;
+  const bs = bandStats(sh, hours, now, sumH), src = state.hourly?.model?.source || "source unknown";
+  const cards = BANDS.filter(([k]) => bs[k].n > 0).map(([k, name, rng]) => { const r = bs[k]; return `<div class="stat band"><h3>${name} (${rng}) · ${r.n} station${r.n > 1 ? "s" : ""} <small>n=${r.n}, median</small></h3>
+    <div><b${r.snowLast == null ? ' title="No data in this window"' : ""}>${r.snowLast == null ? "–" : `+${r.snowLast} cm`}</b><span>New snow last ${sumH} h, measured</span></div>
+    <div><b${r.snowNext == null ? ' title="No forecast for these stations"' : ""}>${r.snowNext == null ? "–" : `+${r.snowNext} cm`}</b><span>Next ${sumH} h, model · ${esc(src)}</span></div>
+    <div><b${r.tmin == null ? ' title="No data in this window"' : ""}>${t(r.tmin)} / ${t(r.tmax)} °C</b><span>Min / max last ${sumH} h, measured</span></div></div>`; }).join("");
+  el.innerHTML = stat(deep ? `${Math.round(deep.hs)} cm` : "–", deep ? `Deepest · ${esc(deep.name)}` : "Deepest station")
+    + (g ? stat(`${Math.round(g.y)} km/h`, `Strongest gust, last ${sumH} h · ${esc(gs?.name ?? g.id)} · ${g.wr == null ? "direction unknown" : `<span style="display:inline-block;transform:rotate(${(g.wr + 180) % 360}deg)" aria-hidden="true">↑</span> from ${compass(g.wr)}`} · ${fmtSlot(keyMs(g.k))}`)
+      : `<div class="stat"><b title="No data in this window">–</b><span>Strongest gust, last ${sumH} h</span></div>`)
+    + (cards || '<p class="src xl">No station data in this window.</p>') + note;
 }
+document.getElementById("sumWin").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  sumH = winOr(+b.dataset.h, sumH);
+  try { localStorage.setItem("sumH", sumH); } catch {}
+  renderSummary();
+});
 
 const DG = ["No rating", "Low", "Moderate", "Considerable", "High", "Very high"];
 const dchip = (l, t = "") => `<span class="dg dg${l}">${l ? l + " " : ""}${t || DG[l]}</span>`;

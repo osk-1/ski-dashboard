@@ -13,7 +13,7 @@ export default [
     languageOptions: { sourceType: "script", globals: { ...globals.browser, L: "readonly", Chart: "readonly", module: "readonly" } },
     rules: { "no-empty": ["error", { allowEmptyCatch: true }] }, // storage access is wrapped in try { ... } catch {}
   },
-  { files: ["app.js"], languageOptions: { globals: Object.fromEntries(["tierOf", "groupByPixel", "describeGroup", "STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "slice", "WINDOWS", "winOr", "tickStepH", "risePts", "delta", "latest", "extreme", "refroze", "valueState", "misplaced", "goodOnly", "refreshStale", "staleAfter", "offlineAfter"].map((n) => [n, "readonly"])) } }, // from lib.js
+  { files: ["app.js"], languageOptions: { globals: Object.fromEntries(["tierOf", "groupByPixel", "describeGroup", "STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "slice", "WINDOWS", "winOr", "tickStepH", "risePts", "delta", "latest", "extreme", "refroze", "valueState", "misplaced", "goodOnly", "refreshStale", "staleAfter", "offlineAfter", "bandOf", "BANDS", "median", "compass", "bandStats", "strongestGust"].map((n) => [n, "readonly"])) } }, // from lib.js
   {
     files: ["**/*.mjs", "**/*.js"],
     ignores: ["app.js", "lib.js"],

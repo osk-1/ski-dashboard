@@ -180,6 +180,11 @@ a { color: var(--accent); }
 .banner { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--wind); background: color-mix(in srgb, var(--wind) 14%, var(--panel)); font-weight: 500; }
 s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px; }
 .why { display: block; color: var(--muted); font-size: .72rem; font-weight: 400; line-height: 1.25; white-space: normal; min-width: 7em; }
+#sumBody { display: contents; }
+.strip .seg.xl { max-width: none; }
+.band { grid-column: 1 / -1; flex: 1 1 260px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; align-content: start; }
+.band h3 { grid-column: 1 / -1; margin: 0; font: 600 .95rem/1.2 var(--body); } .band h3 small { color: var(--muted); font-weight: 400; }
+.band b { font-size: 1rem; white-space: nowrap; } .band span { font-size: .68rem; display: block; line-height: 1.25; }
 .strip .xl { flex-basis: 100%; grid-column: 1 / -1; margin: 0; }
 #map .val b.nd { color: var(--muted); font-weight: 500; font-style: italic; }
 #checksN { margin-left: 10px; }
@@ -198,7 +203,8 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
   </header>
 
   <section class="panel strip" id="summary" aria-label="Summary">
-    <div class="stat"><b>–</b><span>Deepest station</span></div>
+    <div class="seg xl" id="sumWin" role="group" aria-label="Summary window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+    <div id="sumBody"><div class="stat"><b>–</b><span>Deepest station</span></div></div>
   </section>
 
   <section class="panel" id="danger" aria-label="Avalanche danger" hidden></section>
