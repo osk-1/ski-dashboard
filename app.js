@@ -391,9 +391,9 @@ function renderCond(s) {
   el("condBox").hidden = condH === 1; el("condNow").hidden = condH !== 1; el("condRh").parentNode.hidden = condH === 1;
   if (condH === 1) {
     el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now), own = Date.parse(s.dates?.[f] || s.date);
-      // instant values: TAWES/Vorarlberg hours are the HH:00 sample; a Tirol hour holds a time inside it, so the station's own time when it is that hour, else only the hour, aged from its end
+      // instant values: TAWES/Vorarlberg hours are the HH:00 sample; a Tirol hour holds a time inside it, so the station's own time when it is that hour and the same value (the hour keeps its first value), else only the hour, aged from its end
       // pr/hr cover whole hours and have no staleAfter: never stale
-      const at = v && staleAfter[f] && (gauge ? keyMs(v.k) : !isNaN(own) && viennaKey(own) === v.k ? own : null), end = v && (at || keyMs(v.k) + 3600e3);
+      const at = v && staleAfter[f] && (gauge ? keyMs(v.k) : !isNaN(own) && viennaKey(own) === v.k && v.y === s[f] ? own : null), end = v && (at || keyMs(v.k) + 3600e3);
       const fl = v && hours[v.k].flags?.[id]?.[f], old = v && Date.now() - end > staleAfter[f], t = v ? `${esc(v.y)} ${u}` : "–";
       const when = !v ? "no data" : at ? fmtSlot(at) : staleAfter[f] ? `hour of ${fmtSlot(keyMs(v.k))}` : fmtSlot(keyMs(v.k));
       return `<div class="stat"><b>${fl || old ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${when}${fl ? ` · suspect: ${esc(fl)}` : old ? " · not current" : ""}</small></div>`; }).join("");
