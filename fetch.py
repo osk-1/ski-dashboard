@@ -3,7 +3,7 @@
 
 Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
-  data/forecast.json   5-day snowfall and min/max temperature per station
+  data/forecast.json   7-day snowfall and min/max temperature per station
   data/hourly.json     {"model": {source, issued}, "hours": {local "YYYY-MM-DDTHH": {field: {stationId: value}}}}, rolling 7 days (+ model hours ahead); see README
   data/health.json     {run, sources: {tirol, tawes, vorarlberg, model, bulletins: {ok, error, detail}}, flagged, offline}; see README
   data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned

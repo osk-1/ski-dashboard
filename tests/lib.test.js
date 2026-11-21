@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale } = require("../lib.js");
+const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -126,4 +126,21 @@ test("describeGroup: snow+wind, two snow, snow+wind+snow, single", () => {
   assert.deepEqual(describeGroup([S("a", "snow", 10), S("b", "snow", 90)]), { lead: S("b", "snow", 90), wind: null, count: 2 });
   assert.deepEqual(describeGroup([S("a", "snow", 10), S("w", "wind"), S("b", "snow", 90)]), { lead: S("b", "snow", 90), wind: null, count: 3 });
   assert.deepEqual(describeGroup([S("w", "wind")]), { lead: S("w", "wind"), wind: null, count: 1 });
+});
+
+test("winOr / tickStepH", () => {
+  assert.equal(winOr(72, 24), 72); assert.equal(winOr(5, 24), 24); assert.equal(winOr(NaN, 24), 24);
+  assert.deepEqual(WINDOWS.map(tickStepH), [undefined, 2, 4, 12, 24, 24, 24]);
+});
+test("risePts: never negative, gaps stay null", () => {
+  const h = { "2026-11-20T10": { hr: { A: -0.4 } }, "2026-11-20T11": { hr: { A: 1.5 } }, "2026-11-20T13": { hr: { A: 0 } } };
+  const ys = risePts(h, "A", keyMs("2026-11-20T10"), keyMs("2026-11-20T13")).map(p => p.y);
+  assert.deepEqual(ys, [0, 1.5, null, 0]);
+});
+test("delta: change over backH, null when either end is missing", () => {
+  const h = { "2026-11-20T10": { hs: { A: 50.2 } }, "2026-11-20T11": { hs: { A: 51 } }, "2026-11-20T12": {}, "2026-11-20T13": { hs: { A: 53.1 } } };
+  assert.deepEqual(delta(h, "hs", "A", keyMs("2026-11-20T13"), 3), { now: 53.1, then: 50.2, d: 2.9 });
+  assert.deepEqual(delta(h, "hs", "A", keyMs("2026-11-20T12"), 2), { now: 51, then: 50.2, d: 0.8 }); // gap hour falls back to the latest value
+  assert.equal(delta(h, "hs", "A", keyMs("2026-11-20T13"), 6), null);
+  assert.equal(delta(h, "hs", "B", keyMs("2026-11-20T13"), 1), null);
 });

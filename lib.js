@@ -28,6 +28,17 @@ const slice = (hours, field, id, from, to) => {
 };
 // newest recorded value of a field at or before `to`
 const latest = (hours, field, id, to) => { const lim = viennaKey(to), k = Object.keys(hours).sort().reverse().find(k => k <= lim && hours[k][field]?.[id] != null); return k ? { k, y: hours[k][field][id] } : null; };
+// chart windows in hours (#40) and the x-axis tick spacing (h) for each
+const WINDOWS = [1, 6, 12, 24, 48, 72, 168];
+const winOr = (v, def) => WINDOWS.includes(v) ? v : def;
+const tickStepH = h => ({ 6: 2, 12: 4, 24: 12, 48: 24, 72: 24, 168: 24 })[h];
+// new snow: hourly HS rise, never negative (settling); gaps stay null
+const risePts = (hours, id, from, to) => slice(hours, "hr", id, from, to).map(p => ({ ...p, y: p.y == null ? null : Math.max(0, p.y) }));
+// change of a field over the last backH hours: { now, then, d } from the newest values at or before each instant; null if either is missing
+const delta = (hours, field, id, now, backH) => {
+  const a = latest(hours, field, id, now), b = latest(hours, field, id, now - backH * H);
+  return a && b ? { now: a.y, then: b.y, d: Math.round((a.y - b.y) * 10) / 10 } : null;
+};
 const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10); // "YYYY-MM-DD" + n days
 // the latest night (18:00-08:00) or day (08:00-18:00) that has ended by `now`, over its full length in hourly.json
 // { date (local date it starts on), pts with data, of = hours in the period (DST-aware, normally 14 / 10) }
@@ -80,4 +91,4 @@ const describeGroup = members => {
   const lead = snowy.reduce((a, b) => (b.hs ?? -1) > (a.hs ?? -1) ? b : a, snowy[0] || members[0]);
   return snowy.length === 1 && wind.length === 1 ? { lead, wind: wind[0], count: 1 } : { lead, wind: null, count: members.length };
 };
-if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale };
+if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale };

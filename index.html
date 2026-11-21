@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous">
 <style>
-/* Layout: summary strip, then map beside the station list, then history + forecast for the selected station. */
+/* Layout: summary strip, then map beside the station list, then conditions + snow depth for the selected station. */
 :root {
   --bg: #f4f7fa; --panel: #ffffff; --fg: #142030; --muted: #5b6b7d; --line: #d8e0e8;
   --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c; --wind: #c0561a; --relief-op: .38; --relief-blend: multiply; --relief-filter: none;
@@ -233,25 +233,22 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
   <section class="panel">
     <h2 id="condTitle">Conditions</h2>
     <div class="ctl">
-      <div class="seg" id="condWin" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+      <div class="seg" id="condWin" data-chart="cond" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
       <label class="tog"><input type="checkbox" id="condRh"> Humidity</label>
     </div>
     <div class="chartbox" id="condBox"><canvas id="cond" role="img" aria-label="Conditions chart"></canvas></div>
     <div class="strip now" id="condNow" hidden></div>
     <p class="src" id="condNote"></p>
   </section>
-  <div class="grid2">
-    <section class="panel">
-      <h2 id="histTitle">History</h2>
-      <div class="chartbox"><canvas id="hist" role="img" aria-label="History chart"></canvas></div>
-      <p class="src" id="histNote"></p>
-    </section>
-    <section class="panel">
-      <h2 id="fcTitle">5-day snowfall forecast</h2>
-      <div class="chartbox"><canvas id="fc" role="img" aria-label="Snowfall forecast chart"></canvas></div>
-      <p class="src" id="fcSource"></p>
-    </section>
-  </div>
+  <section class="panel" id="snowPanel">
+    <h2 id="snowTitle">Snow depth</h2>
+    <div class="ctl">
+      <div class="seg" id="snowWin" data-chart="snow" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+    </div>
+    <div class="chartbox" id="snowBox"><canvas id="snow" role="img" aria-label="Snow depth chart"></canvas></div>
+    <div class="strip now" id="snowNow" hidden></div>
+    <p class="src" id="snowNote"></p>
+  </section>
   </div>
 
   <details class="panel" id="checks">

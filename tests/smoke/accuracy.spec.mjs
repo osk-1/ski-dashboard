@@ -96,7 +96,7 @@ for (const vp of VIEWPORTS) {
       await page.selectOption("#stnSel", "VOR-ZURS1");
       await expect.poll(() => page.evaluate(() => Chart.getChart("cond")?.data.datasets[0].data.find((p) => p.fl)?.k)).toBe("2026-11-20T14");
       await expect(page.locator("#condNote")).toContainText("Faded points");
-      await expect(page.locator("#fcSource")).toContainText("Model: Open-Meteo, issued");
+      await expect(page.locator("#snowNote")).toContainText("Open-Meteo"); // model source named under the snow chart
       await shot(page.locator("#condBox"), "cond-flag");
       // a minute re-check that changes no state re-renders nothing: keyboard focus on a table row stays
       await page.locator('#rows tr[data-id="KDIA2"]').focus();
