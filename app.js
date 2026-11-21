@@ -14,7 +14,7 @@ const win = { cond: 24, snow: 72, wind: 24 }; // chart windows in hours, one swi
 const winKey = k => k + "H"; // localStorage keys condH, snowH, windH
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
-let cardId; const hl = () => cardId ?? state.selected; // map highlight: the card preview, else the selection
+let cardId; const hl = () => cardId ?? (sheetOn() ? null : state.selected); // map highlight: the card preview, else the selection (the sheet: none, the map is the overview)
 for (const k in win) try { win[k] = winOr(+localStorage.getItem(winKey(k)), win[k]); } catch {}
 
 let chgH = 24, sortBy = { k: "alt", dir: -1 }; // table: change window (hours back) and sort, sort is not persisted
@@ -196,12 +196,16 @@ if (sheetPref) document.body.append(card); // above the sheet, which stacks abov
 function openCard(id) {
   const s = state.stations.find(x => x.id === id); if (!s) return;
   cardId = id; // renderMap highlights it via hl(); state.selected only changes in select()
-  const g = goodOnly(s, Date.now());
+  const g = goodOnly(s, Date.now()), hours = state.hourly?.hours || {}, now = anchorMs(hours, Date.now());
+  // range of the last 24 h from the unflagged hourly values and the current good value (not for direction or the 24 h new-snow sum)
+  const mm = (f, fmt) => { const lo = f !== "wr" && f !== "n24" && extremeOf(hours, f, id, now - 24 * 3600e3, now, false), hi = lo && extremeOf(hours, f, id, now - 24 * 3600e3, now, true);
+    const v = [lo?.y, hi?.y, g[f]].filter(x => x != null); // the live value can be newer than the last hourly one
+    return lo ? `<small>24 h: min ${fmt(Math.min(...v))} · max ${fmt(Math.max(...v))}</small>` : ""; };
   document.getElementById("scTitle").textContent = s.name; document.getElementById("scAlt").textContent = `${s.alt} m`;
   document.getElementById("scRows").innerHTML = scRows.map(([f, fmt]) => {
     const bad = g.bad[f], label = FN[f][0].toUpperCase() + FN[f].slice(1);
     if (g[f] == null && !bad && !(f === "hs" && s.type === "snow")) return ""; // hide what this station type does not measure
-    return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + "</div>";
+    return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + mm(f, fmt) + "</div>";
   }).join("");
   renderMap(); card.classList.add("open"); card.focus();
 }

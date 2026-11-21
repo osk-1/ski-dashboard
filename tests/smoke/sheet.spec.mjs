@@ -17,12 +17,16 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await expect(page.getByRole("button", { name: "Full screen", exact: true })).toBeHidden();
     expect(await hit(page, 150)).toBe("map"); expect(await hit(page, vp.height - 40)).toBe("sheet");
     await expect(page.locator("#legend")).toBeInViewport();
+    await expect(page.locator("#map .val.sel")).toHaveCount(0); // nothing tapped: no station highlighted
+    expect((await page.locator("h1").boundingBox()).height).toBeLessThanOrEqual(1); // name for screen readers only
     await shot(page, "sheet-peek", vp, scheme);
 
     const s = st("SKAP2"); // tap a station: its card slides over the sheet, the map stays visible above it
     await page.evaluate(([lat, lon]) => { map.setView([lat, lon], map.getZoom() + 2, { animate: false }); }, [s.lat, s.lon]);
     await page.locator('#map [data-sid="SKAP2"]').first().click();
     const card = page.locator("#stationCard"); await expect(card).toBeVisible(); await expect(card).toBeFocused();
+    await expect(page.locator("#map .val.sel")).toHaveCount(1);
+    await expect(card.locator(".scr small").first()).toHaveText(/^24 h: min -?\d+.* · max -?\d+/);
     await page.waitForTimeout(300); // slide-in
     expect(await page.evaluate(() => document.elementFromPoint(100, innerHeight - 30).closest("#stationCard") != null)).toBe(true); // on top of the sheet
     expect(await hit(page, 100)).toBe("map");

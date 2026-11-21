@@ -137,12 +137,14 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
   html.sheet #mapPanel .legend { position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--peek) + 8px); margin: 0; padding: 4px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
   html.sheet .wrap { position: relative; z-index: 1; margin-top: calc(100svh - var(--peek)); padding-top: 10px; background: var(--bg); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); scroll-snap-align: start; }
   html.sheet #stationCard { position: fixed; z-index: 3; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); } /* moved to <body> (app.js): over the sheet */
+  html.sheet h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } /* the page name stays for screen readers only */
   html.sheet .wrap::before { content: ""; justify-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin-bottom: -8px; }
 }
 #stationCard:focus { outline: none; }
 #stationCard .sc-h { display: flex; gap: 8px; align-items: flex-start; } #stationCard .sc-h > div { flex: 1; min-width: 0; } /* both buttons stay in view when the rows scroll */
 #stationCard h3 { margin: 0; font-size: 1.1rem; } #stationCard p { margin: 2px 0 8px; color: var(--muted); font-size: .85rem; }
 #stationCard .scr { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; padding: 5px 0; border-top: 1px solid var(--line); align-items: baseline; }
+#stationCard .scr small { grid-column: 2 / 4; text-align: right; color: var(--muted); font-size: .8rem; margin-top: -4px; }
 #stationCard .scr b.nd { grid-column: 2 / 4; color: var(--muted); font-weight: 600; text-align: right; } #stationCard .scr i { color: var(--muted); font-style: normal; font-size: .85rem; min-width: 3.5em; text-align: right; }
 #stationCard button { min-width: 44px; min-height: 44px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font: 600 .95rem/1 var(--body); cursor: pointer; }
 #stationCard #scOpen { padding: 0 12px; color: var(--bg); background: var(--accent); border-color: var(--accent); }
