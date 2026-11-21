@@ -1,4 +1,4 @@
-/* global win, cardId, openCard */
+/* global win, cardId, openCard, getComputedStyle, document, innerHeight */
 // Wide screens keep the page layout (no sheet, no full-screen mode); crossing the phone breakpoint moves the panel and card without leftovers.
 import { expect, test } from "@playwright/test";
 import { DESKTOP, open, VIEWPORTS } from "./helpers.mjs";
@@ -63,3 +63,22 @@ test("crossing the phone breakpoint: card closed, panel and card moved, one shar
   expect(problems).toEqual([]);
   await context.close();
 });
+
+for (const vp of [{ name: "1440", width: 1440, height: 900 }, { name: "1024", width: 1024, height: 768 }]) {
+  test(`map-first layout at ${vp.name}: full-height map beside a scrolling sidebar holding the charts`, async ({ browser }) => {
+    const { page, context, problems } = await open(browser, vp, "light", { desktop: true });
+    await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
+    const map = await page.locator("#map").boundingBox();
+    const side = await page.locator(".wrap").boundingBox();
+    expect(map.y).toBe(0);
+    expect(map.height).toBe(vp.height);
+    expect(map.x).toBeGreaterThanOrEqual(side.width);
+    expect(map.width).toBeGreaterThan(side.width);
+    expect(side.height).toBe(vp.height);
+    expect(await page.locator(".wrap").evaluate((el) => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === "auto")).toBe(true);
+    for (const id of ["cond", "snow", "wind"]) expect(await page.locator(`.wrap #${id}`).count()).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true); // the page itself does not scroll
+    expect(problems).toEqual([]);
+    await context.close();
+  });
+}
