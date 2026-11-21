@@ -472,8 +472,12 @@ function chartDefaults() {
 // sheet: values in a fixed line above the chart (#<id>Read) instead of a tooltip under the finger; a tap or a drag moves a cursor that stays; it starts at the latest measurement
 const readout = ({ chart: c, tooltip: t }) => {
   const el = document.getElementById(c.canvas.id + "Read"); if (!el || !t.opacity) return; // nothing under the finger: keep the last values
-  const col = lc => lc.backgroundColor && lc.backgroundColor !== "transparent" ? lc.backgroundColor : lc.borderColor;
-  el.innerHTML = `<b>${esc(t.title.join(" "))}</b>` + t.body.map((b, i) => `<span><i style="background:${esc(col(t.labelColors[i]))}"></i>${esc(b.lines.join(" "))}</span>`).join("") + t.afterBody.map(x => `<span>${esc(x)}</span>`).join("");
+  const col = d => d.backgroundColor && d.backgroundColor !== "transparent" ? d.backgroundColor : d.borderColor, { raw } = t.dataPoints[0], T = t.dataPoints[0].parsed.x, [lo, hi] = raw.x0 != null ? [raw.x0, raw.x1] : [T, T], label = c.options.plugins.tooltip.callbacks.label;
+  // every visible series at the cursor's time (a bin: its range, the latest point), "–" for gaps, so the line keeps its shape while dragging
+  const rows = c.data.datasets.flatMap((d, i) => { if (!c.isDatasetVisible(i) || d.noTip) return [];
+    const p = d.data.filter(p => p.y != null && (p.x0 != null ? p.x0 <= hi && p.x1 >= lo : p.x >= lo && p.x <= hi)).pop();
+    return [`<span><i style="background:${esc(col(d))}"></i>${esc(p ? label({ dataset: d, parsed: { x: p.x, y: p.y }, raw: p }) : d.label + ": –")}</span>`]; });
+  el.innerHTML = `<b>${esc(t.title.join(" "))}</b>` + rows.join("") + t.afterBody.map(x => `<span>${esc(x)}</span>`).join("");
 };
 const cursor = { id: "cursor",
   afterRender(c) { // first draw at a real size: put the cursor on the latest measured hour (else now)

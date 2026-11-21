@@ -47,9 +47,11 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await expect(page.locator("#condWin button:visible")).toHaveCount(3);
     const read = page.locator("#condRead");
     await expect(read).toContainText("Air: "); await expect(read.locator("b")).toHaveText("20 Nov, 10:00"); // starts at the latest measured hour (the fixture station stops at 10:00)
+    const n = await read.locator("span").count(), shown = await page.evaluate(() => { const c = Chart.getChart("cond"); return c.data.datasets.filter((d, i) => c.isDatasetVisible(i) && !d.noTip).length; });
+    expect(n).toBe(shown); // one entry per visible series, gaps as "–"
     const box = await page.locator("#cond").boundingBox();
     await page.touchscreen.tap(box.x + box.width * .3, box.y + box.height / 2);
-    await expect(read.locator("b")).not.toHaveText("20 Nov, 10:00"); const t = await read.locator("b").textContent();
+    await expect(read.locator("b")).not.toHaveText("20 Nov, 10:00"); await expect(read.locator("span")).toHaveCount(n); const t = await read.locator("b").textContent();
     await page.waitForTimeout(300); await expect(read.locator("b")).toHaveText(t); // stays after the finger lifts
     await shot(page, "sheet-charts", vp, scheme);
     await page.locator("#chartTabs button[data-tab='snow']").click();
@@ -58,7 +60,7 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     for (const c of ["condWin", "snowWin", "windWin"]) await expect(page.locator(`#${c} button[data-h='168']`)).toHaveAttribute("aria-pressed", "true");
     const bars = await page.evaluate(() => Chart.getChart("snow").data.datasets.filter((d) => d.type === "bar").map((d) => d.data.length));
     expect(Math.max(...bars)).toBeLessThanOrEqual(8); // daily sums, not 168 hourly bars
-    await expect(page.locator("#snowBox")).toBeVisible(); await shot(page, "sheet-snow-7d", vp, scheme);
+    await expect(page.locator("#snowBox")).toBeVisible(); await expect(page.locator("#snowRead")).toContainText("Snow height"); await expect(page.locator("#snowRead")).toContainText("Snow depth rise"); await shot(page, "sheet-snow-7d", vp, scheme);
     await page.locator("#chartTabs button[data-tab='cond']").click();
 
     await page.evaluate(() => document.getElementById("checks").scrollIntoView()); // fully raised: the sheet covers the map
