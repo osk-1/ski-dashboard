@@ -307,7 +307,10 @@ function renderMap() {
   // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge at tiers 0–1 (none at tier 2, the highlighted one never), labels follow the zoom tier (#39).
   // Landmark labels move beside/above/below their symbol to clear dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
   const size = map.getSize(), at = (lat, lon) => map.latLngToContainerPoint([lat, lon]), tier = tierOf(map.getZoom(), fitZ);
-  const narrow = size.x < 480, charW = narrow ? 7 : 8, tipH = narrow ? 20 : 24;
+  const narrow = size.x < 480, tipH = narrow ? 20 : 24;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize), sample = "Kappl Sinsenergampen 0123456789 cm", cx = document.createElement("canvas").getContext("2d");
+  cx.font = `600 ${(narrow ? .78 : .9) * rem}px ${getComputedStyle(mapDiv).fontFamily}`;
+  const charW = Math.max(narrow ? 7 : 8, cx.measureText(sample).width / sample.length); // the tooltip's real average glyph width: a fallback font can be wider than the Barlow estimate
   mapDiv.classList.toggle("narrow", narrow);
   const area = r => (r[2] - r[0]) * (r[3] - r[1]);
   const overlap = (r, q) => Math.max(0, Math.min(r[2], q[2]) - Math.max(r[0], q[0])) * Math.max(0, Math.min(r[3], q[3]) - Math.max(r[1], q[1]));
