@@ -58,3 +58,23 @@ for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
     await context.close();
   });
 }
+
+// #60: Open charts picks the relevant tab (not persisted); a station tapped near the bottom stays above the card
+test("station card: wind station opens on Wind, map keeps the station above the card", async ({ browser }) => {
+  const { page, context, problems } = await open(browser, VIEWPORTS[0], "light", { storage: { tab: "cond", layers: JSON.stringify({ on: { snow: true, wind: true } }) } });
+  const card = page.locator("#stationCard");
+  await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
+  const s = fixture("stations").stations.find((x) => x.id === "SKAP1");
+  await page.evaluate(([lat, lon]) => { // put the station at the bottom of the map, where the card will be
+    map.setView([lat, lon], fitZ + 2, { animate: false });
+    const h = map.getSize().y; map.panBy([0, h / 2 - 20], { animate: false }); // station now 20 px from the map's bottom edge
+    document.querySelector('#map [data-sid="SKAP1"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  }, [s.lat, s.lon]);
+  await expect(card).toBeVisible();
+  await expect.poll(async () => (await page.locator('#map [data-sid="SKAP1"]').boundingBox()).y).toBeLessThanOrEqual((await card.boundingBox()).y);
+  await page.getByRole("button", { name: "Open charts" }).click();
+  await expect(page.locator(".chartsec")).toHaveAttribute("data-tab", "wind");
+  expect(await page.evaluate(() => localStorage.getItem("tab"))).toBe("cond"); // auto-chosen tab is not saved
+  expect(problems).toEqual([]);
+  await context.close();
+});
