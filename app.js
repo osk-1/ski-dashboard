@@ -146,7 +146,7 @@ function nsShow() {
     () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); renderMap(); } });
 }
 // Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
-let fs = false, fsPushed = false, fsY = 0, fsBtn;
+let fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
 const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
 function enterFs() {
   if (fs) return;
@@ -159,13 +159,13 @@ function exitFs() {
   fs = false; fsPanel.classList.remove("fs"); document.documentElement.classList.remove("fs-lock"); fsBtn.setAttribute("aria-pressed", "false");
   document.getElementById("legend").classList.remove("open"); document.getElementById("fsLegend").setAttribute("aria-expanded", "false");
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  if (fsPushed) { fsPushed = false; if (history.state?.fs) history.back(); } // popstate already consumed the entry when it started the exit
+  if (fsPushed) { fsPushed = false; if (history.state?.fs) { fsBack = true; history.back(); } } // popstate already consumed the entry when it started the exit
   scrollTo(0, fsY); fsRefresh(); fsBtn.focus();
 }
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = e => e.currentTarget.setAttribute("aria-expanded", document.getElementById("legend").classList.toggle("open"));
 addEventListener("keydown", e => { if (e.key === "Escape" && fs) exitFs(); });
-addEventListener("popstate", () => { fsPushed = false; exitFs(); });
+addEventListener("popstate", () => { if (fsBack) { fsBack = false; return; } fsPushed = false; exitFs(); }); // fsBack: the pop our own history.back() causes must not close a session entered since
 addEventListener("orientationchange", () => { if (map) fsRefresh(); });
 document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
 function initMap() {

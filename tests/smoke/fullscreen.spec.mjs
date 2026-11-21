@@ -13,6 +13,8 @@ for (const mode of ["css", "api"]) for (const vp of VIEWPORTS) for (const scheme
     const btn = page.getByRole("button", { name: "Full screen", exact: true });
     await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Reset view" })).toBeVisible();
+    await expect(page.locator('button[aria-label="Reset view"] circle')).toHaveCount(1); // crosshair, not the four-corners icon
+    await expect(btn.locator("circle")).toHaveCount(0);
     await expect(btn).toHaveAttribute("aria-pressed", "false");
     await page.evaluate(() => window.scrollTo(0, 120)); const y0 = await page.evaluate(() => scrollY);
     expect(await page.evaluate(() => map.dragging.enabled())).toBe(false);
@@ -33,19 +35,22 @@ for (const mode of ["css", "api"]) for (const vp of VIEWPORTS) for (const scheme
     await enter(); await fills(vp.width, vp.height);
     if (mode === "api") expect(await page.evaluate(() => !!document.fullscreenElement)).toBe(true);
     await page.getByRole("button", { name: "Legend", exact: true }).click(); await expect(page.locator("#legend")).toBeVisible();
-    await shot(page, "fullscreen-portrait", vp, scheme);
+    await shot(page, `fullscreen-portrait-${mode}`, vp, scheme);
     await page.getByRole("button", { name: "Legend", exact: true }).click(); await expect(page.locator("#legend")).toBeHidden();
 
     if (vp.name === "390" && mode === "css") { // rotation (a real fullscreen window cannot be resized by the test)
       await page.setViewportSize({ width: 844, height: 390 }); await settle(page); await fills(844, 390);
-      if (scheme === "light") await shot(page, "fullscreen-landscape", vp, scheme);
+      if (scheme === "light") await shot(page, `fullscreen-landscape-${mode}`, vp, scheme);
       await page.setViewportSize({ width: vp.width, height: vp.height }); await settle(page);
     }
     await page.locator("#fsExit").click(); await exited();                                   // ✕
     await enter(); await page.keyboard.press("Escape"); await exited();                      // Escape
     await enter(); await page.goBack(); await exited();                                      // Android back (popstate)
     expect(await page.evaluate(() => history.state?.fs)).toBeUndefined();
-    await enter(); await page.evaluate(() => exitFs()); await exited();                      // shared exit
+    if (mode === "css") { await enter(); await page.evaluate(() => { exitFs(); document.getElementById("mapPanel").querySelector(".leaflet-bar button[aria-pressed]").click(); }); await settle(page); // (css only: a late fullscreenchange of the real API is a separate race) exit then re-enter at once: the late popstate must not close the new session
+    expect(await page.evaluate(() => document.getElementById("mapPanel").classList.contains("fs"))).toBe(true);
+    await page.evaluate(() => exitFs()); await exited(); }
+    if (mode === "api") { await enter(); await page.evaluate(() => document.exitFullscreen()); await exited(); } // fullscreenchange path
     expect(problems).toEqual([]);
     await context.close();
   });
