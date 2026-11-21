@@ -387,12 +387,16 @@ function renderCond(s) {
   el("condBox").hidden = el("condNow").hidden = el("condWin").parentNode.hidden = !has;
   if (!has) { el("condNote").textContent = "No hourly data for this station."; return; }
   const now = anchorMs(hours, Date.now()), m = state.hourly.model || {};
-  const modelSrc = `model · ${m.source || "source unknown"}${m.issued ? ", issued " + fmtSlot(m.issued) : ""}`;
+  const modelSrc = `model · ${m.source || "source unknown"}${m.issued ? ", latest issue " + fmtSlot(m.issued) : ""}`;
   el("condBox").hidden = condH === 1; el("condNow").hidden = condH !== 1; el("condRh").parentNode.hidden = condH === 1;
   if (condH === 1) {
-    el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now);
-      const fl = v && hours[v.k].flags?.[id]?.[f], old = v && Date.now() - keyMs(v.k) > staleAfter[f], t = v ? `${esc(v.y)} ${u}` : "–"; // pr/hr have no staleAfter: never stale
-      return `<div class="stat"><b>${fl || old ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${v ? fmtSlot(keyMs(v.k)) : "no data"}${fl ? ` · suspect: ${esc(fl)}` : old ? " · not current" : ""}</small></div>`; }).join("");
+    el("condNow").innerHTML = lines.map(([f, name, u]) => { const v = latest(hours, f, id, now), own = Date.parse(s.dates?.[f] || s.date);
+      // instant values: TAWES/Vorarlberg hours are the HH:00 sample; a Tirol hour holds a time inside it, so the station's own time when it is that hour, else only the hour, aged from its end
+      // pr/hr cover whole hours and have no staleAfter: never stale
+      const at = v && staleAfter[f] && (gauge ? keyMs(v.k) : !isNaN(own) && viennaKey(own) === v.k ? own : null), end = v && (at || keyMs(v.k) + 3600e3);
+      const fl = v && hours[v.k].flags?.[id]?.[f], old = v && Date.now() - end > staleAfter[f], t = v ? `${esc(v.y)} ${u}` : "–";
+      const when = !v ? "no data" : at ? fmtSlot(at) : staleAfter[f] ? `hour of ${fmtSlot(keyMs(v.k))}` : fmtSlot(keyMs(v.k));
+      return `<div class="stat"><b>${fl || old ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${when}${fl ? ` · suspect: ${esc(fl)}` : old ? " · not current" : ""}</small></div>`; }).join("");
     el("condNote").textContent = `Latest measured values (${srcOf(id)}), with their measurement times.`;
     return;
   }
@@ -453,7 +457,8 @@ for (const cid of ["hist", "cond"]) for (const ev of ["pointerup", "touchend", "
 function renderBanner() {
   const last = state.health?.run || state.updated, b = document.getElementById("banner");
   b.hidden = !refreshStale(last, Date.now());
-  b.textContent = `Data may be out of date: the last successful refresh was ${last ? fmtSlot(last) : "unknown"}. Check the measurement times before relying on any value.`;
+  const txt = `Data may be out of date: the last successful refresh was ${isNaN(Date.parse(last)) ? "unknown" : fmtSlot(last)}. Check the measurement times before relying on any value.`;
+  if (b.textContent !== txt) b.textContent = txt; // role="status": rewriting the same text may re-announce it
 }
 const WHY = { "out of range": "outside the possible range for this sensor", jump: "changed implausibly fast since the hour before", stuck: "the same value for 6 hours in a row",
   "gust below mean": "gust lower than the mean wind", "sensor frozen?": "wind 0 for 3 hours in freezing, saturated air: the anemometer is probably iced up", "time in future": "measurement time is after the data run" };
@@ -476,7 +481,10 @@ function renderChecks() {
   document.getElementById("checkList").innerHTML = (items.length ? items : ["All values passed the checks."]).map(x => `<li>${x}</li>`).join("");
 }
 
-function renderAll() { renderBanner(); renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); renderChecks(); }
+// what the clock can change: each value's state kind and the banner rule; the minute re-check re-renders only when this changes (a rebuilt table drops keyboard focus)
+const accSig = () => { const now = Date.now(); return JSON.stringify([refreshStale(state.health?.run || state.updated, now), state.stations.map(s => Object.keys(staleAfter).map(f => Object.keys(valueState(s, f, now))[0]))]); };
+let lastSig;
+function renderAll() { lastSig = accSig(); renderBanner(); renderSummary(); renderDanger(); renderMap(); renderTable(); renderCharts(); renderChecks(); }
 
 function select(id) {
   state.selected = id;
@@ -528,7 +536,7 @@ async function load() {
 }
 load();
 // accuracy is judged against the clock: re-check every minute without refetching (charts keep their state)
-setInterval(() => { if (state.stations.length) { renderBanner(); renderSummary(); renderMap(); renderTable(); renderChecks(); } }, 60e3);
+setInterval(() => { if (state.stations.length && accSig() !== lastSig) { lastSig = accSig(); renderBanner(); renderSummary(); renderMap(); renderTable(); renderChecks(); } }, 60e3);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && Date.now() - lastLoad > 30 * 60e3) load();
 });

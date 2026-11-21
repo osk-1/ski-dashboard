@@ -51,6 +51,11 @@ for (const vp of VIEWPORTS) {
       await page.click("#condWin button[data-h='1']");
       await expect(page.locator("#condNow")).toContainText("°C");
       await expect(page.locator("#condBox")).toBeHidden();
+      // 1 h times: gauge hours are the HH:00 sample; a Tirol hour shows the station's own time when it is that hour, else only "hour of"
+      await expect(page.locator("#condNow .stat").first()).toContainText("20 Nov, 16:00");
+      await page.selectOption("#stnSel", "SKAP2"); // newest hourly lt at 10:00, station time 15:40
+      await expect(page.locator("#condNow .stat").first()).toContainText("hour of 20 Nov, 10:00");
+      await expect(page.locator("#condNow .stat").first().locator("s.bad")).toHaveCount(1);
       await page.locator("#condNow").screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}-cond-1h.png`) });
       await page.click("#condWin button[data-h='24']");
       await expect.poll(() => page.evaluate(() => !!Chart.getChart("cond"))).toBe(true);

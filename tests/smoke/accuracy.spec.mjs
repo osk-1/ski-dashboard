@@ -97,6 +97,10 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#condNote")).toContainText("Faded points");
       await expect(page.locator("#fcSource")).toContainText("Model: Open-Meteo, issued");
       await shot(page.locator("#condBox"), "cond-flag");
+      // a minute re-check that changes no state re-renders nothing: keyboard focus on a table row stays
+      await page.locator('#rows tr[data-id="KDIA2"]').focus();
+      await page.clock.fastForward("01:00");
+      await expect(page.locator('#rows tr[data-id="KDIA2"]')).toBeFocused();
       // the minute re-check, no refetch: 3 h later Zürs HS (13:35) is past 6 h and gets struck
       await page.clock.fastForward("03:01:00");
       await expect(page.locator('#rows tr[data-id="VOR-ZURS1"] td').nth(2).locator("s.bad")).toHaveCount(1);
