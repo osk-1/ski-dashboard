@@ -9,20 +9,15 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const fmtSlot = t => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
 const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}" transform="translate(${x} ${y}) rotate(${to})"/>`;
 
-let state = { stations: [], readings: [], danger: null, regions: null, hourly: null, health: null, updated: null, selected: null };
+let state = { stations: [], danger: null, regions: null, hourly: null, health: null, updated: null, selected: null };
 const win = { cond: 24, snow: 72, wind: 24 }; // chart windows in hours, one switch per chart
 const winKey = k => k + "H"; // localStorage keys condH, snowH, windH
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
 for (const k in win) try { win[k] = winOr(+localStorage.getItem(winKey(k)), win[k]); } catch {}
 
-function delta24(id) {
-  const r = state.readings; if (r.length < 2) return null;
-  const last = [...r].reverse().find(x => x.hs[id] != null); if (!last) return null;
-  const cutoff = new Date(last.t) - 24 * 3600e3, prev = [...r].reverse().find(x => new Date(x.t) <= cutoff);
-  const a = last.hs[id], b = prev?.hs[id];
-  return a == null || b == null ? null : Math.round(a - b);
-}
+let chgH = 24, sortBy = { k: "alt", dir: -1 }; // table: change window (hours back) and sort, sort is not persisted
+try { chgH = winOr(+localStorage.getItem("chgH"), 24); } catch {}
 
 // accuracy (#42): words for what is wrong with a value, never the value itself
 const FN = { hs: "snow height", n24: "new snow 24 h", hsd24: "24 h change", lt: "air temp", oft: "snow surface", rh: "humidity", wg: "wind", wg_boe: "gusts", wr: "wind direction" };
@@ -390,16 +385,33 @@ function renderMap() {
 
 function renderTable() {
   if (!state.stations.length) return;
-  const byAlt = (a, b) => b.alt - a.alt, rows = placed().filter(vis).sort(byAlt), now = Date.now();
+  const byAlt = (a, b) => b.alt - a.alt, now = Date.now(), hours = state.hourly?.hours || {}, anchor = anchorMs(hours, now);
   // close reading: a value that is not current or suspect stays visible, greyed and struck through, with the reason
   const st = (s, f) => valueState(s, f, now), strike = (v, t) => isBad(v) ? `<s class="bad">${t}</s>` : t;
   const why = vs => { const t = [...new Set(vs.filter(isBad).map(badText))]; return t.length ? `<span class="why">${esc(t.join("; "))}</span>` : ""; };
-  document.getElementById("rows").innerHTML = !rows.length ? '<tr><td colspan="5" class="empty">No stations selected on the map.</td></tr>' : rows.map(s => {
-    const d = delta24(s.id), hs = st(s, "hs"), wg = st(s, "wg"), gu = st(s, "wg_boe"), wr = st(s, "wr");
-    return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}">
-      <td class="nm" title="${esc(s.name)}">${esc(s.name)}<small>${s.alt} m</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : strike(hs, Math.round(s.hs) + '<span class="u"> cm</span>')}</b>${why([hs])}</td>
+  const prim = s => s.type === "wind" ? "wg" : s.type === "weather" ? "lt" : "hs";
+  const list = placed().filter(vis).map(s => { // sort keys: only good values, so stale/suspect/missing ones sort last
+    const g = goodOnly(s, now), d = state.hourly ? delta(hours, "hs", s.id, anchor, chgH)?.d ?? null : null;
+    return { s, d, v: { alt: s.alt, hs: g.hs, chg: isBad(st(s, "hs")) ? null : d, wg: g.wg, lt: g.lt } };
+  });
+  const k = sortBy.k, val = r => r.v[k];
+  list.sort((a, b) => (val(a) == null) - (val(b) == null) || (val(a) == null ? 0 : (val(a) - val(b)) * sortBy.dir) || byAlt(a.s, b.s));
+  for (const th of document.querySelectorAll("#tbl th[data-k]")) {
+    const on = th.dataset.k === k;
+    th.setAttribute("aria-sort", on ? (sortBy.dir > 0 ? "ascending" : "descending") : "none");
+    th.querySelector(".ar").textContent = on ? (sortBy.dir > 0 ? "▲" : "▼") : "";
+  }
+  document.getElementById("chgHead").textContent = `Δ HS ${chgH === 168 ? "7 d" : chgH + " h"}`;
+  document.getElementById("chgSel").value = chgH;
+  document.getElementById("rows").innerHTML = !list.length ? '<tr><td colspan="7" class="empty">No stations selected on the map.</td></tr>' : list.map(({ s, d }) => {
+    const hs = st(s, "hs"), wg = st(s, "wg"), gu = st(s, "wg_boe"), wr = st(s, "wr"), lt = st(s, "lt"), stale = isBad(st(s, prim(s)));
+    const last = Date.parse(s.date);
+    return `<tr tabindex="0" data-id="${esc(s.id)}" aria-selected="${s.id === state.selected}"${stale ? ' class="stale"' : ""}>
+      <td class="nm" title="${esc(s.name)}">${esc(s.name)}${stale ? ' <em class="tag">stale</em>' : ""}<small>${s.alt} m${stale ? " · stale" : ""}</small></td><td class="n altc">${s.alt} m</td><td class="n"><b>${s.hs == null ? "–" : strike(hs, Math.round(s.hs) + '<span class="u"> cm</span>')}</b>${why([hs])}</td>
       <td class="n ${d > 0 && !isBad(hs) ? "up" : ""}">${d == null ? "–" : strike(hs, (d > 0 ? "+" : "") + d)}</td>
-      <td class="n">${hasWind(s) ? `${arrowOn(s) ? strike(wr, `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span>`) + " " : ""}${strike(wg, Math.round(s.wg))}${s.wg_boe != null ? " / " + strike(gu, Math.round(s.wg_boe)) : ""}${why([wg, gu, wr])}` : "–"}</td></tr>`;
+      <td class="n">${hasWind(s) ? `${arrowOn(s) ? strike(wr, `<span style="display:inline-block;color:var(--wind);transform:rotate(${(s.wr + 180) % 360}deg)">↑</span>`) + " " : ""}${strike(wg, Math.round(s.wg))}${s.wg_boe != null ? " / " + strike(gu, Math.round(s.wg_boe)) : ""}${why([wg, gu, wr])}` : "–"}</td>
+      <td class="n">${s.lt == null ? "–" : strike(lt, (Math.round(s.lt * 10) / 10) + "°")}${why([lt])}</td>
+      <td class="n last" title="${isNaN(last) ? "" : esc(fmtSlot(last))}">${isNaN(last) ? "–" : esc(fmtLast(last))}</td></tr>`;
   }).join("");
   const sel = document.getElementById("stnSel");
   const opts = placed().filter(s => vis(s) || s.id === state.selected).sort(byAlt).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join(""); // the selected station stays listed even when hidden
@@ -407,6 +419,18 @@ function renderTable() {
   sel.value = state.selected;
   sel.parentNode.hidden = false;
 }
+
+document.getElementById("tbl").addEventListener("click", e => {
+  const th = e.target.closest("th[data-k]"); if (!th || !e.target.closest("button")) return;
+  const k = th.dataset.k;
+  sortBy = k === sortBy.k ? { k, dir: -sortBy.dir } : { k, dir: k === "alt" ? 1 : -1 };
+  renderTable();
+});
+document.getElementById("chgSel").addEventListener("change", e => {
+  chgH = winOr(+e.target.value, chgH);
+  try { localStorage.setItem("chgH", chgH); } catch {}
+  renderTable();
+});
 
 function chartDefaults() {
   Chart.defaults.color = css("--muted");
@@ -706,11 +730,10 @@ async function load() {
   loading = true;
   const get = f => fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
   try {
-    const [st, rd, dg, rg, hr, he] = await Promise.all([get("stations"), get("readings").catch(() => ({})), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null), get("health").catch(() => null)]);
+    const [st, dg, rg, hr, he] = await Promise.all([get("stations"), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null), get("health").catch(() => null)]);
     state.danger = dg; state.regions = rg;
     state.stations = st.stations || [];
     state.hourly = hr; state.health = he; state.updated = st.updated;
-    state.readings = Object.values(rd).sort((a, b) => new Date(a.t) - new Date(b.t));
     if (!placed().some(s => s.id === state.selected)) state.selected = placed().map(s => goodOnly(s, Date.now())).sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id; // a misplaced or saved-but-gone station is never picked; default: deepest good HS
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations`;
     lastLoad = Date.now();
