@@ -19,6 +19,7 @@ import json
 import math
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -52,6 +53,7 @@ STATIONS = (
 )
 FIELDS = ("hs", "lt", "wg", "wg_boe", "wr")  # per-slot maps in readings.json
 HOURLY_DAYS = 7
+BACKFILL_MAX, BACKFILL_SECONDS = 48, 300  # Tirol archive files per run (newest missing hours first) and wall-clock budget; the rest wait for later runs
 HFIELDS = ("lt", "oft", "rh", "hs", "hr", "pr", "pm", "sm", "mt", "wg", "wg_boe", "wr")  # per-hour maps in hourly.json
 MEASURED = ("lt", "oft", "rh", "hs", "wg", "wg_boe", "wr")  # what makes a Tirol hour "present" (not model, not derived)
 WIND = ("SKAP1", "SAGA1", "SAAU1", "KSIN1", "KDIA1", "SAYO1", "SARE1", "KGRO1", "IPIS1")
@@ -340,6 +342,16 @@ def missing_hours(hours, ids, now):
     return [x for x in out if hkey(x) not in have]
 
 
+def backfill(missing):
+    """The missing archive hours this run fetches: newest first, at most BACKFILL_MAX."""
+    return sorted(missing, reverse=True)[:BACKFILL_MAX]
+
+
+def tirol_slot(hours, k):
+    """readings.json maps for slot k, Tirol ids only, from hours[k]: keyed by each feature's own measurement hour, so a stuck feed's old value never poses as the slot's."""
+    return {f: {id: x for id, x in hours.get(k, {}).get(f, {}).items() if id in STATIONS} for f in FIELDS}
+
+
 def hs_rise(hours, ids):
     """hr[id] at k = positive HS change from the hour before (0 when it fell or stayed); only where both hours have hs."""
     for k, v in hours.items():
@@ -520,6 +532,11 @@ def parse_open_meteo(res, ids, days):
     return pts, model
 
 
+def model_meta(prev, model, now):
+    """hourly.json "model": only an Open-Meteo run writes model hours, so the fallback (model None) keeps the previous source and issue time."""
+    return {"source": "Open-Meteo", "issued": now.isoformat(timespec="minutes")} if model else prev
+
+
 def forecast(stations):
     days = [(datetime.now(TZ).date() + timedelta(days=i)).isoformat() for i in range(5)]
     try:
@@ -600,8 +617,12 @@ def main(days):
             print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
         hourly = {"model": {"source": None, "issued": None}, "hours": {}}
         hours = hourly["hours"]
-    bad = 0
-    for t in missing_hours(hours, STATIONS, now):  # Tirol archive: only hours not yet recorded
+    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now), time.monotonic()
+    todo = backfill(miss)  # Tirol archive: only hours not yet recorded, capped so a slow archive can't time out the job
+    for i, t in enumerate(todo):
+        if time.monotonic() - t0 > BACKFILL_SECONDS:
+            todo = todo[:i]
+            break
         try:
             for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
                 hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
@@ -610,6 +631,8 @@ def main(days):
             bad += 1
     if bad:
         note("tirol", f"archive hours failed: {bad}")
+    if len(miss) > len(todo):
+        note("tirol", f"backfill: {len(miss) - len(todo)} hours left for later runs")
     try:
         for k, maps in tirol_hours(live, by_uuid).items():
             hmerge(hours, k, maps, keep=True)
@@ -618,27 +641,9 @@ def main(days):
         note("tirol", f"live hour failed: {e}")
     sl = slots(days, now)
     iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
-    for s in sl:
-        try:
-            feats = get_json(snapshot_url(s))["features"]
-        except Exception as e:
-            print("skip", s.isoformat(), e, file=sys.stderr)
-            note("tirol", f"slot snapshot failed: {s.isoformat()}")
-            continue
-        maps = {k: {} for k in FIELDS}
-        for f in feats:
-            if f["id"] in by_uuid:
-                p, st = f["properties"], by_uuid[f["id"]]
-                add(
-                    maps,
-                    st["id"],
-                    hs=depth(p.get("HS")) if st["type"] == "snow" else None,
-                    lt=num(p.get("LT")),
-                    wg=num(p.get("WG")),
-                    wg_boe=num(p.get("WG_BOE")),
-                    wr=num(p.get("WR")),
-                )
-        merge(readings, s.strftime("%Y-%m-%dT%H"), s.isoformat(), maps)  # merge: keep other sources' ids (TAWES)
+    for k, t in iso.items():  # Tirol slots from the date-checked hours (only the 7-day window: older --days slots get no Tirol values)
+        if any((maps := tirol_slot(hours, k)).values()):
+            merge(readings, k, t, maps)  # merge: keep other sources' ids (TAWES)
     try:  # TAWES slots and hours, one historical request
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
         start = min(sl[:1] + [now - timedelta(days=HOURLY_DAYS, hours=1)])  # whole window each run, so TAWES gaps heal on their own
@@ -676,9 +681,7 @@ def main(days):
         fc, model = forecast(stations)
         for k, maps in (model or {}).items():  # model values of this run replace earlier ones at the same hours
             hours.setdefault(k, {}).update(maps)
-        hourly["model"] = (
-            {"source": "Open-Meteo", "issued": now.isoformat(timespec="minutes")} if model else {"source": None, "issued": hourly["model"].get("issued")}
-        )
+        hourly["model"] = model_meta(hourly["model"], model, now)
         fc["generated"] = now.isoformat(timespec="minutes")
         with open("data/forecast.json", "w") as fh:
             json.dump(fc, fh)
@@ -686,9 +689,8 @@ def main(days):
     except Exception as e:
         print("forecast failed:", e, file=sys.stderr)
         fail("model", e)
-        hourly["model"] = {"source": None, "issued": hourly["model"].get("issued")}
     hs_rise(hours, STATIONS)
-    hourly["hours"] = prune_hours(hours, now)
+    hourly["hours"] = {k: {f: m for f, m in v.items() if m} for k, v in prune_hours(hours, now).items()}  # empty maps omitted
     hour_flags(hourly["hours"])
     with open("data/hourly.json", "w") as fh:
         json.dump(hourly, fh, sort_keys=True, separators=(",", ":"))
@@ -1020,6 +1022,18 @@ def selftest():
         os.remove(tmp)
     nf = lambda code: urllib.error.HTTPError("u", code, "x", None, None)
     assert (preseason("LWD Vorarlberg", nf(404)), preseason("LWD Vorarlberg", nf(500)), preseason("Euregio avalanche.report", nf(404))) == (True, False, False)
+    # backfill: newest missing hours first, at most BACKFILL_MAX per run
+    mh = missing_hours({}, STATIONS, now)
+    assert (len(backfill(mh)), backfill(mh)[0], backfill(mh)[-1], backfill(mh[:3])) == (48, mh[-1], mh[-48], mh[2::-1])
+    # Tirol slots: a stale feature (date older than its file's hour) lands at its own hour, not the slot; other sources' ids stay out
+    sl = {**th, "2026-11-20T07": {**th["2026-11-20T07"], "lt": {**th["2026-11-20T07"]["lt"], "TAWES-11311": 1.0}}}
+    assert (tirol_slot(sl, "2026-11-20T07"), tirol_slot(sl, "2026-11-20T08")) == (
+        {"hs": {"SKAP2": 30.8}, "lt": {"SKAP2": -2.8}, "wg": {}, "wg_boe": {}, "wr": {}},
+        {f: {} for f in FIELDS},
+    )
+    # model label: the fallback keeps the earlier Open-Meteo source and issue time
+    prev = {"source": "Open-Meteo", "issued": "2026-11-20T08:00+01:00"}
+    assert (model_meta(prev, None, now), model_meta(prev, {"x": {}}, now)) == (prev, {"source": "Open-Meteo", "issued": "2026-11-20T12:30+01:00"})
     print("selftest ok")
 
 
