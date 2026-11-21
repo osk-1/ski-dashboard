@@ -234,6 +234,7 @@ function openCard(id) {
     if (g[f] == null && !bad && !(f === "hs" && s.type === "snow")) return ""; // hide what this station type does not measure
     return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + mm(f, fmt) + "</div>";
   }).join("");
+  if (sheetOn()) scrollTo(0, 0); // the sheet is locked while the card is open (CSS), so lower it first
   renderMap(); card.classList.add("open"); card.focus();
 }
 function closeCard(refocus = true) {
