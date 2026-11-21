@@ -223,9 +223,9 @@ function closeCard(refocus = true) {
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
   const id = cardId, s = state.stations.find(x => x.id === id); closeCard(false); // closeCard clears cardId
-  // a station of type "wind" opens on Wind for this pick only; the user's tab (and localStorage) is restored after the render
-  const prev = tab; if (sheetOn() && s?.type === "wind") tab = "wind";
-  select(id); tab = prev;
+  // a station of type "wind" opens on Wind; kept in memory only (not saved), so later refreshes keep it and a reload returns to the saved tab
+  if (sheetOn() && s?.type === "wind") tab = "wind";
+  select(id);
   // instant ("auto"): honours prefers-reduced-motion
   requestAnimationFrame(() => requestAnimationFrame(() => (sheetOn() ? chartsec : document.getElementById("condTitle")).scrollIntoView({ block: "start", behavior: "auto" })));
 };
