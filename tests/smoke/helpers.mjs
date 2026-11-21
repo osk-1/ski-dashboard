@@ -31,4 +31,5 @@ export async function open(browser, vp, scheme, overrides = {}) {
   return { page, context, problems };
 }
 
-export const shot = (page, name, vp, scheme) => page.screenshot({ path: `test-results/screens/${name}-${vp.name}-${scheme}.png` });
+// optional locator: element screenshot instead of the viewport (a tall element, e.g. the map panel, is framed whole)
+export const shot = (page, name, vp, scheme, locator = page) => locator.screenshot({ path: `test-results/screens/${name}-${vp.name}-${scheme}.png` });

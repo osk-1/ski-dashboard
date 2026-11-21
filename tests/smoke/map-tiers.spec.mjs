@@ -22,20 +22,20 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#map .pl.pk")).toContainText("Valluga");
       expect(await page.locator('#map [aria-label*=" stations:"]').count()).toBeGreaterThanOrEqual(1);
       noOverlaps(await visibleBoxes(page, "#map .pl, #map path[data-sid], #map .wind-ic:not([data-sid])"), true); // village labels vs everything; dots vs dots are merged by the 28 px rule
-      await shot(page, "map-tier0", vp, scheme);
+      await shot(page, "map-tier0", vp, scheme, page.locator("#mapPanel"));
 
       // tier 1: values, more peaks, no station names, nothing overlaps
       await zoomBy(page, 1);
       expect(await page.locator("#map .leaflet-tooltip.val").count()).toBeGreaterThan(0);
       await expect(page.locator("#map .val .nm:visible")).toHaveCount(0);
       noOverlaps(await visibleBoxes(page, "#map .val, #map .pl"));
-      await shot(page, "map-tier1", vp, scheme);
+      await shot(page, "map-tier1", vp, scheme, page.locator("#mapPanel"));
 
       // tier 2: station names too
       await zoomBy(page, 2);
       expect(await page.locator("#map .val .nm:visible").count()).toBeGreaterThan(0);
       noOverlaps(await visibleBoxes(page, "#map .val, #map .pl"));
-      await shot(page, "map-tier2", vp, scheme);
+      await shot(page, "map-tier2", vp, scheme, page.locator("#mapPanel"));
 
       // zooming out re-lays-out: values and extra peaks are gone again
       await zoomBy(page, 0);
