@@ -120,7 +120,7 @@ html.sheet #stationCard.open { display: block; } /* phones: the card sits in the
   html.sheet #map .leaflet-top { margin-top: env(safe-area-inset-top); }
   html.sheet #mapPanel .legend { position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--peek) + 8px + 100lvh - 100svh); margin: 0; padding: 4px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
   html.sheet .wrap { position: relative; z-index: 1; margin-top: calc(100svh - var(--peek)); padding-top: 10px; background: var(--bg); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); scroll-snap-align: start; }
-  html.sheet:has(#stationCard.open) :is(.glance, #updated) { display: none; }
+  html.sheet:has(#stationCard.open) :is(.glance, #updated, #summary, .grid2 > .panel:has(#tableDetails)) { display: none; } /* a selected station: station info only; the overview and the HS table are for the unselected sheet */
   html.sheet header { display: block; } html.sheet #dangerChip { display: none; } /* danger is in the glance */
   html.sheet .glance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   html.sheet .glance .stat b { font-size: 1.35rem; white-space: nowrap; } html.sheet .glance .dg { display: inline-block; font: 600 .85rem/1.6 var(--body); text-transform: none; letter-spacing: 0; color: #142030; } html.sheet .glance .dg4 { color: #fff; } html.sheet .glance .dg5 { color: #ff0000; }
