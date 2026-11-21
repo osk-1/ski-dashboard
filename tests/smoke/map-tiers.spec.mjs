@@ -34,6 +34,7 @@ for (const vp of VIEWPORTS) {
       // tier 2: station names too
       await zoomBy(page, 2);
       expect(await page.locator("#map .val .nm:visible").count()).toBeGreaterThan(0);
+      expect(await page.locator("#map .pl.pk").count()).toBeGreaterThan(1); // peaks are not hidden zoomed in on the sheet map (#52)
       noOverlaps(await visibleBoxes(page, "#map .val, #map .pl"));
       await shot(page, "map-tier2", vp, scheme, page.locator("#mapPanel"));
 

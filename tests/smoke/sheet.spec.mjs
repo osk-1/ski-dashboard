@@ -11,7 +11,7 @@ const hit = (page, y) => page.evaluate((yy) => { const e = document.elementFromP
 // bottom sheet (the only phone layout): full-screen map under a page that scrolls over it
 for (const vp of VIEWPORTS) for (const scheme of ["light", "dark"]) {
   test(`bottom sheet at ${vp.name}px, ${scheme}`, async ({ browser }) => {
-    const { page, context, problems } = await open(browser, vp, scheme, );
+    const { page, context, problems } = await open(browser, vp, scheme);
     await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
     const m = await page.locator("#mapPanel").boundingBox();
     expect([m.x, m.y, m.width]).toEqual([0, 0, vp.width]); expect(m.height).toBeGreaterThanOrEqual(vp.height);

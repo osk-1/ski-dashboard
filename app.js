@@ -11,6 +11,7 @@ const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}
 
 let state = { stations: [], danger: null, regions: null, hourly: null, health: null, updated: null, selected: null };
 const win = { cond: 24, snow: 72, wind: 24 }; // chart windows in hours, one switch per chart
+const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), phone = () => sheetMq.matches, sheetOn = phone; // phones: the bottom sheet is the only layout
 const winKey = k => k + "H"; // localStorage keys condH, snowH, windH
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
@@ -98,9 +99,8 @@ let map, groups, dangerLayer, dangerOk, lc, lp, fitBounds, fitZ;
 const landmarks = [];
 const mapDiv = document.getElementById("map");
 const legendOpen = () => document.getElementById("legend").classList.contains("open");
-const setLegend = on => { document.getElementById("legend").classList.toggle("open", on); for (const b of document.querySelectorAll("#legend button")) b.setAttribute("aria-expanded", on); }; 
+const setLegend = on => { document.getElementById("legend").classList.toggle("open", on); for (const b of document.querySelectorAll("#legend button")) b.setAttribute("aria-expanded", on); };
 document.getElementById("legend").addEventListener("click", e => { if (e.target.closest("button")) setLegend(!legendOpen()); });
-const phone = () => matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)").matches;
 // Map layer selector: station categories (a data array, so more can be added) + the avalanche-danger overlay.
 const CATS = [["snow", "Snow"], ["wind", "Wind"], ["weather", "Weather"]];
 const catOf = s => s.type === "wind" || s.type === "weather" ? s.type : "snow";
@@ -170,15 +170,14 @@ function nsShow() {
 // Bottom sheet (phones, sheetMq): the map fills the screen and the page scrolls over it as a sheet.
 // On a phone the panel moves to the top of <body> so the sheet (.wrap) can stack above it; the card follows (above the sheet).
 const mapPanel = document.getElementById("mapPanel"), card = document.getElementById("stationCard"), panelHome = mapPanel.parentElement;
-const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), sheetOn = () => sheetMq.matches;
 const refreshMap = () => { map.invalidateSize(); if (sheetOn()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+const sheetWin = () => { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; }; // one shared window; notes behind "About this chart"
 const placeSheet = () => {
   document.documentElement.classList.toggle("sheet", sheetOn());
-  if (sheetOn()) { document.body.prepend(mapPanel); document.body.append(card); } else { panelHome.prepend(mapPanel); mapPanel.append(card); }
+  if (sheetOn()) { document.body.prepend(mapPanel); document.body.append(card); sheetWin(); } else { closeCard(false); panelHome.prepend(mapPanel); mapPanel.append(card); }
 };
 placeSheet();
-sheetMq.addEventListener("change", () => { placeSheet(); if (map) refreshMap(); });
-if (sheetOn()) { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; } // one shared window; notes behind "About this chart"
+sheetMq.addEventListener("change", () => { placeSheet(); if (map) { refreshMap(); renderCharts(); } });
 // sheet: one chart at a time (tabs); a tab whose panel the station lacks (no snow / wind) falls back to Conditions
 let tab = "cond";
 try { tab = localStorage.getItem("tab") || "cond"; } catch {}
