@@ -482,7 +482,10 @@ function chartDefaults() {
   Chart.defaults.color = css("--muted");
   Chart.defaults.borderColor = css("--line");
   Chart.defaults.font.family = css("--body");
-  if (sheetOn()) { Chart.register(cursor); Chart.defaults.events = ["mousemove", "click", "touchstart", "touchmove"]; Object.assign(Chart.defaults.plugins.tooltip, { enabled: false, external: readout }); } // no mouseout / touchend: the cursor stays
+  const sh = sheetOn(); // set both ways: a resize across the sheet breakpoint must restore the stock tooltip
+  if (sh) Chart.register(cursor);
+  Chart.defaults.events = sh ? ["mousemove", "click", "touchstart", "touchmove"] : ["mousemove", "mouseout", "click", "touchstart", "touchmove"]; // sheet: no mouseout / touchend, the cursor stays
+  Object.assign(Chart.defaults.plugins.tooltip, { enabled: !sh, external: sh ? readout : null });
   // "nearest" on the x axis, but only points with a value (a null bar or gap would otherwise win and show no tooltip) and never the direction arrows
   Chart.Interaction.modes.nearestX = (c, e) => {
     const all = []; let best = Infinity;
@@ -512,6 +515,7 @@ function renderCharts() {
   const s = state.stations.find(x => x.id === state.selected);
   if (!s || typeof Chart === "undefined") return;
   chartDefaults();
+  for (const e of document.querySelectorAll(".read")) e.textContent = ""; // no stale values from the previous station / window
   renderCond(s);
   renderSnow(s);
   renderWind(s);
