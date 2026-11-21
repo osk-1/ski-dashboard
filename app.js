@@ -156,7 +156,15 @@ function nsShow() {
 }
 // Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
 let fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
-const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs || sheetOn()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+// Bottom-sheet prototype (?sheet=1 on, ?sheet=0 off, remembered): on phones the map fills the screen and the page scrolls over it as a sheet.
+// The panel moves to the top of <body> so the sheet (.wrap) can stack above it; the full-screen mode stays for the non-sheet layout.
+let sheetPref = false;
+try { const q = new URLSearchParams(location.search).get("sheet"); if (q != null) localStorage.setItem("sheet", q); sheetPref = localStorage.getItem("sheet") === "1"; } catch {}
+const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), sheetOn = () => sheetPref && sheetMq.matches;
+if (sheetPref) { document.documentElement.classList.add("sheet"); document.body.prepend(fsPanel); }
+sheetMq.addEventListener("change", () => { if (map) fsRefresh(); });
+const sheetPeek = () => sheetOn() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
 // keyboard focus stays in the panel: everything beside it (and beside each ancestor) is inert while in full screen
 const fsInert = on => { for (let e = fsPanel; e.parentElement && e !== document.body; e = e.parentElement) for (const x of e.parentElement.children) if (x !== e) x.inert = on; };
 function enterFs() {
@@ -177,12 +185,13 @@ function exitFs() {
 }
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = () => setLegend(!legendOpen());
-addEventListener("keydown", e => { if (e.key === "Escape" && fs) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card (CSS mode; in API full screen the browser takes Escape and fullscreenchange exits)
+addEventListener("keydown", e => { if (e.key === "Escape" && (fs || sheetOn())) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card (CSS mode; in API full screen the browser takes Escape and fullscreenchange exits)
 addEventListener("popstate", () => { if (fsBack) { fsBack = false; return; } fsPushed = false; exitFs(); }); // fsBack: the pop our own history.back() causes must not close a session entered since
 addEventListener("orientationchange", () => { if (map) fsRefresh(); });
 document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
-// Station card (full screen only): a tap on a station opens it instead of selecting; Open charts leaves full screen and selects.
+// Station card (full screen and the sheet): a tap on a station opens it instead of selecting; Open charts leaves full screen (raises the sheet) and selects.
 const card = document.getElementById("stationCard"), scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
+if (sheetPref) document.body.append(card); // above the sheet, which stacks above the map panel
 
 function openCard(id) {
   const s = state.stations.find(x => x.id === id); if (!s) return;
@@ -203,18 +212,18 @@ function closeCard(refocus = true) {
 }
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
-  const id = cardId; exitFs(); select(id); // exitFs closes the card (cardId cleared)
+  const id = cardId; closeCard(false); exitFs(); select(id); // closeCard clears cardId (exitFs does nothing in the sheet)
   // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
   requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("condTitle").scrollIntoView({ block: "start", behavior: "auto" })));
 };
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
-  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
+  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile || sheetOn() }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
   const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
   fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
-  const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40] }); }; // extra left padding keeps the view clear of the zoom/reset controls
+  const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40 + sheetPeek()] }); }; // extra left padding keeps the view clear of the zoom/reset controls; bottom: the lowered sheet
   const fit = () => { reset(); fitZ = map.getZoom(); map.setMinZoom(fitZ - 1); };
   fit();
   let timer;
@@ -339,7 +348,7 @@ function renderMap() {
     taken.splice(taken.indexOf(lm.box), 1); lm.box = place(lm); taken.push(lm.box);
   }
   const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : pick(n.lead.id); }; // overlapping pads: nearest group or station wins
-  const pick = id => fs ? openCard(id) : select(id);
+  const pick = id => fs || sheetOn() ? openCard(id) : select(id);
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
   for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {

@@ -124,9 +124,21 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
 .panel.fs .legend > button { display: none; }
 .panel.fs .legend.open .wx { display: block; flex-basis: 100%; }
 #stationCard { display: none; }
-.panel.fs #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
-.panel.fs #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
-@media (prefers-reduced-motion: reduce) { .panel.fs #stationCard, .panel.fs #stationCard.open { transition: none; } }
+.panel.fs #stationCard, html.sheet #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
+.panel.fs #stationCard.open, html.sheet #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
+@media (prefers-reduced-motion: reduce) { .panel.fs #stationCard, .panel.fs #stationCard.open, html.sheet #stationCard, html.sheet #stationCard.open { transition: none; } }
+/* bottom-sheet prototype (html.sheet, app.js): map fixed full screen, the page (.wrap) scrolls over it from --peek */
+@media (max-width: 820px), (max-height: 500px) and (orientation: landscape) {
+  html.sheet { --peek: 36svh; scroll-snap-type: y proximity; }
+  html.sheet #mapPanel { position: fixed; top: 0; left: 0; right: 0; height: 100lvh; z-index: 0; padding: 0; border: 0; border-radius: 0; display: flex; flex-direction: column; } /* lvh: the Safari toolbar collapsing must not resize (and re-fit) the map */
+  html.sheet #mapPanel > h2, html.sheet #map .leaflet-left .leaflet-bar:last-child { display: none; } /* the map already fills the screen: no full-screen control */
+  html.sheet #map { flex: 1; height: auto; border-radius: 0; }
+  html.sheet #map .leaflet-top { margin-top: env(safe-area-inset-top); }
+  html.sheet #mapPanel .legend { position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--peek) + 8px); margin: 0; padding: 4px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  html.sheet .wrap { position: relative; z-index: 1; margin-top: calc(100svh - var(--peek)); padding-top: 10px; background: var(--bg); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); scroll-snap-align: start; }
+  html.sheet #stationCard { position: fixed; z-index: 3; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); } /* moved to <body> (app.js): over the sheet */
+  html.sheet .wrap::before { content: ""; justify-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin-bottom: -8px; }
+}
 #stationCard:focus { outline: none; }
 #stationCard .sc-h { display: flex; gap: 8px; align-items: flex-start; } #stationCard .sc-h > div { flex: 1; min-width: 0; } /* both buttons stay in view when the rows scroll */
 #stationCard h3 { margin: 0; font-size: 1.1rem; } #stationCard p { margin: 2px 0 8px; color: var(--muted); font-size: .85rem; }
