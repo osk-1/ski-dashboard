@@ -88,14 +88,34 @@ test("click values", async ({ browser }) => {
   expect(problems).toEqual([]);
 });
 
+const gustPixels = (page) => page.evaluate(() => new Promise((ok) => { const im = new Image(); im.onload = () => { const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, im.width, im.height).data; let a = 0, b = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] === 0) a++; else if (d[i] === 50) b++; } ok([a, b]); }; im.src = document.querySelector(".leaflet-image-layer").src; }));
+
 test("gust border is cleared, inner values kept", async ({ browser }) => {
   const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
   await openPanel(page);
   await radio(page, "Gust").check();
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
-  const [clear, kept] = await page.evaluate(() => new Promise((ok) => { const im = new Image(); im.onload = () => { const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, im.width, im.height).data; let a = 0, b = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] === 0) a++; else if (d[i] === 50) b++; } ok([a, b]); }; im.src = document.querySelector(".leaflet-image-layer").src; }));
+  const [clear, kept] = await gustPixels(page);
   expect(clear).toBeGreaterThan(0); // the border colour (R = 200) is gone...
   expect(kept).toBeGreaterThan(0); // ...the block inside stays
+  expect(problems).toEqual([]);
+});
+
+test("switching away while an image loads does not poison its cache", async ({ browser }) => {
+  let release; const held = new Promise((r) => { release = r; });
+  const base = setup();
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: async (pg) => { await base(pg); await pg.route(`${BASE}/gust/**/*.gif`, async (route) => { await held; await route.fallback(); }); } });
+  await openPanel(page);
+  await radio(page, "Gust").check(); // its image is held...
+  await radio(page, "Wind").check(); // ...while the selection moves to a Lambert overlay
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  release();
+  await page.waitForTimeout(300); // the held gust image finishes drawing, unseen
+  await radio(page, "Gust").check();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  const [clear, kept] = await gustPixels(page);
+  expect(clear).toBeGreaterThan(0);
+  expect(kept).toBeGreaterThan(0);
   expect(problems).toEqual([]);
 });
 

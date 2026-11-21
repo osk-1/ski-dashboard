@@ -143,20 +143,20 @@ function nsPanel() {
   if (f) x.querySelector(`[data-ns="${f}"]`)?.focus();
 }
 // lat/lon -> source pixel [col, row] on a W x H image: Lambert box, or (gust) the plain lat/lon box [lon0, lat0, lon1, lat1]
-const nsPix = (lat, lon, W, H) => { const bs = nsC().boundingBoxes, B = bs.find(b => b.lambert)?.lambert;
+const nsPix = (lat, lon, W, H, cfg) => { const bs = cfg.boundingBoxes, B = bs.find(b => b.lambert)?.lambert;
   if (B) { const [x, y] = lambert(lat, lon); return [Math.floor((x - B[0]) / ((B[2] - B[0]) / W)), Math.floor((B[3] - y) / ((B[3] - B[1]) / H))]; }
   const [x0, y0, x1, y1] = bs.findLast(b => b.bbox).bbox; return [Math.floor((lon - x0) / ((x1 - x0) / W)), Math.floor((y1 - lat) / ((y1 - y0) / H))]; };
 // the gust GIF is opaque: clear the border colour flood-filled in from the edges (a plain colour key would also cut real values inside)
 const nsClear = (d, W, H) => { const k = d.slice(0, 3), st = [], hit = (i, j) => { const p = (j * W + i) * 4; if (d[p + 3] && d[p] === k[0] && d[p + 1] === k[1] && d[p + 2] === k[2]) { d[p + 3] = 0; st.push(i, j); } };
   for (let i = 0; i < W; i++) { hit(i, 0); hit(i, H - 1); } for (let j = 0; j < H; j++) { hit(0, j); hit(W - 1, j); }
   while (st.length) { const j = st.pop(), i = st.pop(); if (i > 0) hit(i - 1, j); if (i < W - 1) hit(i + 1, j); if (j > 0) hit(i, j - 1); if (j < H - 1) hit(i, j + 1); } };
-// GIF in Austria Lambert (or lat/lon) -> canvas over 3x the map's maxBounds (the view is wider than them, and can zoom out a step), sampled linearly in Web Mercator because L.imageOverlay stretches linearly there
-const nsDraw = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
-  const W = im.width, H = im.height, c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const img = g.getImageData(0, 0, W, H), src = img.data; if (!nsC().boundingBoxes.some(b => b.lambert)) nsClear(src, W, H);
+// GIF in Austria Lambert (or lat/lon) -> canvas; cfg is the overlay's own config, not "the current one" (the selection can change while the image loads) over 3x the map's maxBounds (the view is wider than them, and can zoom out a step), sampled linearly in Web Mercator because L.imageOverlay stretches linearly there
+const nsDraw = (url, cfg) => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
+  const W = im.width, H = im.height, c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const src = g.getImageData(0, 0, W, H).data; if (!cfg.boundingBoxes.some(b => b.lambert)) nsClear(src, W, H);
   const P = L.Projection.SphericalMercator, mb = nsBounds(), nw = P.project(mb.getNorthWest()), se = P.project(mb.getSouthEast()), dx = se.x - nw.x, dy = se.y - nw.y, k = 600 / Math.max(Math.abs(dx), Math.abs(dy)); // ~3 px per 500 m source px
   const w = Math.round(Math.abs(dx) * k), h = Math.round(Math.abs(dy) * k), o = document.createElement("canvas"); o.width = w; o.height = h; const og = o.getContext("2d"), out = og.createImageData(w, h);
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const ll = P.unproject(L.point(nw.x + (i + .5) * dx / w, nw.y + (j + .5) * dy / h)), [col, row] = nsPix(ll.lat, ll.lng, W, H);
+    const ll = P.unproject(L.point(nw.x + (i + .5) * dx / w, nw.y + (j + .5) * dy / h)), [col, row] = nsPix(ll.lat, ll.lng, W, H, cfg);
     if (col >= 0 && col < W && row >= 0 && row < H) out.data.set(src.subarray((row * W + col) * 4, (row * W + col) * 4 + 4), (j * w + i) * 4);
   }
   og.putImageData(out, 0, 0); ok(o.toDataURL()); } catch (e) { no(e); } }; im.src = url; });
@@ -167,14 +167,14 @@ function nsClick(e) { // value of the weather PNG under the click, as a pin with
   if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive")) return; // stations and their value tags are not map spots
   const url = nsUrl(nsRange().dataOverlayURL, nsEnd), cur = nsCur();
   (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (!nsOv || nsCur() !== cur) return; // the selection moved on while this loaded
-    const [col, row] = nsPix(e.latlng.lat, e.latlng.lng, W, H), k = lay.wx;
+    const [col, row] = nsPix(e.latlng.lat, e.latlng.lng, W, H, nsC()), k = lay.wx;
     nsPin?.remove(); nsPin = L.circleMarker(e.latlng, { pane: "places", radius: 8, interactive: false, color: css("--fg"), weight: 2, fillOpacity: 0 }).addTo(map)
       .bindTooltip(`<b>${col >= 0 && col < W && row >= 0 && row < H ? `${k === "new-snow" ? "+" : ""}${nsMinus(nsDec(k, d[(row * W + col) * 4]))} ${esc(nsC().units)}${k === "new-snow" ? ` (${esc(nsRange().timeRange)} h)` : ""}` : "–"}</b>`, { permanent: true, direction: "right", offset: [8, 0], className: "val" }); },
     () => { delete nsImg[url]; });
 }
 function nsShow() {
   const url = nsCur(); if (nsOv) return;
-  (nsImg[url] ??= nsDraw(url)).then(src => { if (nsOv || !lay.wx || !nsC() || nsCur() !== url) return; // the selection moved on while this loaded
+  (nsImg[url] ??= nsDraw(url, nsC())).then(src => { if (nsOv || !lay.wx || !nsC() || nsCur() !== url) return; // the selection moved on while this loaded
     nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .55, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
     () => { delete nsImg[url]; if (lay.wx && nsC() && nsCur() === url) { nsErr[lay.wx] = true; nsPanel(); renderMap(); } });
 }
