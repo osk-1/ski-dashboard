@@ -1,4 +1,4 @@
-/* global Chart */
+/* global Chart, map, fitZ */
 // Accuracy acceptance cases (#42): modified copies of the fixtures, routed per test; the shared fixtures stay as they are.
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
@@ -8,12 +8,13 @@ const fixture = (name) => JSON.parse(readFileSync(new URL(`../fixtures/data/${na
 const VIEWPORTS = [{ name: "390", width: 390, height: 844 }, { name: "430", width: 430, height: 932 }];
 
 function data() {
-  const d = Object.fromEntries(["stations", "forecast", "readings", "danger", "regions", "hourly", "health"].map((n) => [n, fixture(n)]));
+  const d = Object.fromEntries(["stations", "danger", "regions", "hourly", "health"].map((n) => [n, fixture(n)]));
   const st = (id) => d.stations.stations.find((s) => s.id === id);
   st("VOR-ZURS1").date = "2026-11-20T13:35:00+01:00"; // 3 h before the run: wind stale, HS still fresh
   st("KSIN2").date = "2026-11-20T09:35:00+01:00"; // 7 h: HS and its 24 h change stale
   Object.assign(st("SAGA1"), { wg: 0, wg_boe: 0, flags: { wg: "sensor frozen?", wg_boe: "sensor frozen?", wr: "sensor frozen?" } }); // rimed anemometer
   Object.assign(st("SKAP2"), { hs: 99, lat: st("SKAP2").lat + 0.009, flags: { station: "location mismatch" } }); // moved 1 km
+  for (const [id, a, b] of [["KSIN2", 40, 46], ["SAUL2", 30, 33]]) { d.hourly.hours["2026-11-19T16"].hs[id] = a; d.hourly.hours["2026-11-20T09"].hs[id] = b; } // a 24 h change exists for the stale/offline stations, so the table can strike it
   d.health.run = "2026-11-20T14:00+01:00"; // last successful refresh 2 h 35 min before "now"
   (d.hourly.hours["2026-11-20T14"].flags ??= {})["VOR-ZURS1"] = { lt: "jump" };
   return d;
@@ -68,12 +69,13 @@ for (const vp of VIEWPORTS) {
         await expect(r.locator("td").nth(2).locator("s.bad")).toHaveCount(1);
         await expect(r.locator("td").nth(3).locator("s.bad")).toHaveCount(1);
       }
-      await expect(page.locator('#rows tr[data-id="KSIN2"] .why')).toHaveText("no recent data (last 09:35)");
+      await expect(page.locator('#rows tr[data-id="KSIN2"] .why').first()).toHaveText("no recent data (last 09:35)");
 
       // rimed anemometer: suspect on the map, excluded from the summary with the reason
+      await page.evaluate(() => map.setView([47.1099, 10.2776], fitZ + 4, { animate: false })); // the fitted map shows no value labels (#39), and the long suspect text needs room: zoom in
       await expect(page.locator(".leaflet-tooltip.val", { hasText: "Gampberg Windstation" })).toContainText("suspect: sensor frozen?");
       await expect(page.locator("#summary")).toContainText("Gampberg Windstation (wind, gusts, wind direction: suspect: sensor frozen?)");
-      await expect(page.locator("#summary")).toContainText("2 excluded"); // Ulmerhütte HS offline, Kappl Sinsenergampen stale
+      await expect(page.locator("#summary")).toContainText("Ulmerhütte (air temp, snow height, 24 h change: no recent data"); // HS offline named in the not-current note
       await expect(page.locator('#rows tr[data-id="SAGA1"] .why')).toHaveText("suspect: sensor frozen?");
       await shot(page.locator("#tableDetails"), "table");
 
@@ -95,7 +97,7 @@ for (const vp of VIEWPORTS) {
       await page.selectOption("#stnSel", "VOR-ZURS1");
       await expect.poll(() => page.evaluate(() => Chart.getChart("cond")?.data.datasets[0].data.find((p) => p.fl)?.k)).toBe("2026-11-20T14");
       await expect(page.locator("#condNote")).toContainText("Faded points");
-      await expect(page.locator("#fcSource")).toContainText("Model: Open-Meteo, issued");
+      await expect(page.locator("#snowNote")).toContainText("Open-Meteo"); // model source named under the snow chart
       await shot(page.locator("#condBox"), "cond-flag");
       // a minute re-check that changes no state re-renders nothing: keyboard focus on a table row stays
       await page.locator('#rows tr[data-id="KDIA2"]').focus();
@@ -112,7 +114,7 @@ for (const vp of VIEWPORTS) {
 }
 
 test("works without health.json", async ({ browser }) => {
-  const d = Object.fromEntries(["stations", "forecast", "readings", "danger", "regions", "hourly"].map((n) => [n, fixture(n)]));
+  const d = Object.fromEntries(["stations", "danger", "regions", "hourly"].map((n) => [n, fixture(n)]));
   const { page, context, problems } = await open(browser, VIEWPORTS[0], "light", d);
   await expect(page.locator("#banner")).toBeHidden(); // stations.json updated is "now"
   await expect(page.locator("#checkList")).toContainText("Source status unavailable");

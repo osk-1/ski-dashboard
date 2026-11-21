@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous">
 <style>
-/* Layout: summary strip, then map beside the station list, then history + forecast for the selected station. */
+/* Layout: summary strip, then map beside the station list, then conditions + snow depth for the selected station. */
 :root {
   --bg: #f4f7fa; --panel: #ffffff; --fg: #142030; --muted: #5b6b7d; --line: #d8e0e8;
   --accent: #1d5fc4; --accent-soft: #dbe7f8; --land: #e9eef3; --village: #8a6a3c; --wind: #c0561a; --relief-op: .38; --relief-blend: multiply; --relief-filter: none;
@@ -33,7 +33,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--
 [hidden] { display: none !important; }
 .wrap { max-width: 1180px; margin: 0 auto; padding-block: 20px 40px;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
-  display: grid; gap: 18px; }
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
 h1 { font: 700 2rem/1.1 var(--display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
 h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02em; text-transform: uppercase; }
@@ -68,7 +68,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .leaflet-tooltip.val.leaflet-interactive { cursor: pointer; }
 #map .val .nm { display: none; margin-right: 5px; font-weight: 400; color: var(--muted); }
 #map .val.sel { z-index: 1000; }
-#map .val.sel .nm, #map.names .val .nm { display: inline; }
+#map .val.sel .nm, #map .val.wn .nm { display: inline; }
 #map .wind-ic { background: none; border: 0; }
 #map .lay { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #map .lay .leaflet-bar { margin: 0; }
@@ -84,6 +84,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .lp :focus-visible, #map .lay > .leaflet-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 820px), (max-height: 500px) and (orientation: landscape) {
   #map .lay > .leaflet-bar button { width: 44px; height: 44px; line-height: 42px; }
+  .panel.fs #map .leaflet-left .leaflet-bar :is(a, button) { width: 44px; height: 44px; line-height: 42px; } /* only in full screen: 44 px in the page shifts the label layout of the small map */
   #map .lp label, #map .lp .gh button { min-height: 44px; } #map .lp input { width: 22px; height: 22px; }
   #map .lp select { height: 44px; } .legend .ls.ns { flex-basis: 100%; } .legend .ls.ns i { flex: none; } /* own scrolling row; 9 swatches would otherwise shrink to nothing */
 }
@@ -92,8 +93,9 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .pl.l { left: auto; right: -4px; flex-direction: row-reverse; }
 #map .pl.d { flex-direction: column; align-items: flex-start; gap: 2px; top: -5px; }
 #map .pl.u { flex-direction: column-reverse; align-items: flex-start; gap: 2px; top: auto; bottom: -5px; }
+#map .gb-ic { pointer-events: none; }
+#map .gb { display: block; box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--fg); color: var(--panel); border: 1px solid var(--panel); font: 700 .7rem/14px var(--body); text-align: center; }
 #map .pl.pk { color: var(--muted); font-weight: 400; }
-#map:not(.zin) .pl.pk { display: none; } /* peaks are dense: only once zoomed in */
 #map .pl.pk i { width: 12px; height: 11px; background: var(--muted); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .8rem; margin-top: 8px; flex-wrap: wrap; }
 .legend svg { vertical-align: middle; }
@@ -107,6 +109,33 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
   .legend.open .wx { display: block; flex-basis: 100%; }
   .legend button { display: inline-block; flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--muted); font: 600 .8rem/1 var(--body); cursor: pointer; }
 }
+#fsExit, #fsLegend { display: none; }
+html.fs-lock, html.fs-lock body { overflow: hidden; }
+.panel.fs { position: fixed; inset: 0; z-index: 10000; height: 100dvh; border-radius: 0; border: 0; box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: flex; flex-direction: column; }
+.panel.fs h2 { display: none; }
+.panel.fs #map { flex: 1; height: auto; min-height: 0; border-radius: 0; }
+.panel.fs #map .leaflet-top.leaflet-right { margin-top: 56px; } /* the Exit button owns the top-right corner; the layers control sits below it */
+.panel.fs #map .lp { max-height: calc(100dvh - 120px) !important; }
+.panel.fs #fsExit, .panel.fs #fsLegend { display: block; position: absolute; z-index: 1; min-width: 44px; height: 44px; padding: 0 14px; box-sizing: border-box; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font: 600 .95rem/1 var(--body); cursor: pointer; }
+.panel.fs #fsExit { top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); }
+.panel.fs #fsLegend { left: max(8px, env(safe-area-inset-left)); bottom: max(8px, env(safe-area-inset-bottom)); }
+.panel.fs .legend { display: none; }
+.panel.fs .legend.open { display: flex; position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px); margin: 0; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.panel.fs .legend > button { display: none; }
+.panel.fs .legend.open .wx { display: block; flex-basis: 100%; }
+#stationCard { display: none; }
+.panel.fs #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
+.panel.fs #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
+@media (prefers-reduced-motion: reduce) { .panel.fs #stationCard, .panel.fs #stationCard.open { transition: none; } }
+#stationCard:focus { outline: none; }
+#stationCard .sc-h { display: flex; gap: 8px; align-items: flex-start; } #stationCard .sc-h > div { flex: 1; min-width: 0; } /* both buttons stay in view when the rows scroll */
+#stationCard h3 { margin: 0; font-size: 1.1rem; } #stationCard p { margin: 2px 0 8px; color: var(--muted); font-size: .85rem; }
+#stationCard .scr { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; padding: 5px 0; border-top: 1px solid var(--line); align-items: baseline; }
+#stationCard .scr b.nd { grid-column: 2 / 4; color: var(--muted); font-weight: 600; text-align: right; } #stationCard .scr i { color: var(--muted); font-style: normal; font-size: .85rem; min-width: 3.5em; text-align: right; }
+#stationCard button { min-width: 44px; min-height: 44px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font: 600 .95rem/1 var(--body); cursor: pointer; }
+#stationCard #scOpen { padding: 0 12px; color: var(--bg); background: var(--accent); border-color: var(--accent); }
+#stationCard button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#fsExit:focus-visible, #fsLegend:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .legend i.b { box-shadow: inset 0 0 0 1px var(--line); } /* the <1 cm band is transparent on the map: empty box */
 .tablebox { overflow-x: auto; }
@@ -123,7 +152,7 @@ td.n, th.n { text-align: right; white-space: nowrap; }
 tbody tr { cursor: pointer; }
 @media (hover: hover) { tbody tr:hover { background: var(--accent-soft); } }
 td small { display: none; color: var(--muted); font-size: .75rem; }
-@media (max-width: 820px) { .altc, .u { display: none; } td small { display: block; } td.nm { font-size: .9rem; white-space: nowrap; max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; } td, th { padding-left: 6px; padding-right: 6px; } }
+@media (max-width: 820px) { .altc, .u { display: none; } td small { display: block; } td.nm { font-size: .9rem; white-space: nowrap; max-width: 0; min-width: 8.5em; width: 100%; overflow: hidden; text-overflow: ellipsis; } td, th { padding-left: 6px; padding-right: 6px; } }
 .chartsec .bar { position: sticky; top: 0; z-index: 500; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .bar label { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; }
 .bar select { flex: 1; min-width: 0; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
@@ -149,8 +178,20 @@ a { color: var(--accent); }
 .dg4 { background: #ff0000; color: #fff; } .dg5 { background: #000; color: #ff0000; border-color: #ff0000; } .dg0 { background: #9aa5b1; color: #142030; }
 .old .dg { opacity: .45; }
 .banner { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--wind); background: color-mix(in srgb, var(--wind) 14%, var(--panel)); font-weight: 500; }
+th button { font: inherit; text-transform: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; min-height: 44px; cursor: pointer; white-space: nowrap; }
+th[aria-sort]:not([aria-sort="none"]) { color: var(--fg); } th .ar { display: inline-block; width: 1em; font-size: .7em; }
+th:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tbar { position: static; padding: 4px 0; border: 0; } .tbar select { flex: 0 0 auto; min-height: 44px; }
+@media (max-width: 820px) { .tag { display: none; } }
+tr.stale td { color: var(--muted); } .tag { font-style: normal; font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+td.last { font-size: .85rem; color: var(--muted); }
 s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px; }
 .why { display: block; color: var(--muted); font-size: .72rem; font-weight: 400; line-height: 1.25; white-space: normal; min-width: 7em; }
+#sumBody { display: contents; }
+.strip .seg.xl { max-width: none; }
+.band { grid-column: 1 / -1; flex: 1 1 260px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; align-content: start; }
+.band h3 { grid-column: 1 / -1; margin: 0; font: 600 .95rem/1.2 var(--body); } .band h3 small { color: var(--muted); font-weight: 400; }
+.band b { font-size: 1rem; white-space: nowrap; } .band span { font-size: .68rem; display: block; line-height: 1.25; }
 .strip .xl { flex-basis: 100%; grid-column: 1 / -1; margin: 0; }
 #map .val b.nd { color: var(--muted); font-weight: 500; font-style: italic; }
 #checksN { margin-left: 10px; }
@@ -169,24 +210,32 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
   </header>
 
   <section class="panel strip" id="summary" aria-label="Summary">
-    <div class="stat"><b>–</b><span>Deepest station</span></div>
+    <div class="seg xl" id="sumWin" role="group" aria-label="Summary window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+    <div id="sumBody"><div class="stat"><b>–</b><span>Deepest station</span></div></div>
   </section>
 
   <section class="panel" id="danger" aria-label="Avalanche danger" hidden></section>
 
   <div class="grid2">
-    <section class="panel">
+    <section class="panel" id="mapPanel">
       <h2>Stations</h2>
       <div id="map"><div class="empty">Loading map…</div></div>
+      <button type="button" id="fsExit" aria-label="Exit full screen">✕ Exit</button>
+      <button type="button" id="fsLegend" aria-expanded="false" aria-controls="legend">Legend</button>
       <div class="legend" id="legend"></div>
+      <section id="stationCard" aria-labelledby="scTitle" tabindex="-1">
+        <div class="sc-h"><div><h3 id="scTitle">Station</h3><p id="scAlt"></p></div><button type="button" id="scOpen">Open charts</button><button type="button" id="scClose" aria-label="Close station card">✕</button></div>
+        <div id="scRows"></div>
+      </section>
     </section>
     <section class="panel">
       <details id="tableDetails">
         <summary><h2>Snow height (HS)</h2></summary>
         <div class="tablebox">
-          <table>
-            <thead><tr><th scope="col">Station</th><th scope="col" class="n altc">Alt.</th><th scope="col" class="n">HS</th><th scope="col" class="n">24 h</th><th scope="col" class="n">Wind</th></tr></thead>
-            <tbody id="rows"><tr><td colspan="5" class="empty">Loading readings…</td></tr></tbody>
+          <div class="bar tbar"><label for="chgSel">Change over</label><select id="chgSel" aria-label="Change window"><option value="1">1 h</option><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option><option value="48">48 h</option><option value="72">72 h</option><option value="168">7 d</option></select></div>
+          <table id="tbl">
+            <thead><tr><th scope="col">Station</th><th scope="col" class="n altc" data-k="alt" aria-sort="none"><button type="button">Alt.<span class="ar"></span></button></th><th scope="col" class="n" data-k="hs" aria-sort="none"><button type="button">HS<span class="ar"></span></button></th><th scope="col" class="n" data-k="chg" aria-sort="none"><button type="button"><span id="chgHead">Δ HS 24 h</span><span class="ar"></span></button></th><th scope="col" class="n" data-k="wg" aria-sort="none"><button type="button">Wind<span class="ar"></span></button></th><th scope="col" class="n" data-k="lt" aria-sort="none"><button type="button">Temp<span class="ar"></span></button></th><th scope="col" class="n">Last reading</th></tr></thead>
+            <tbody id="rows"><tr><td colspan="7" class="empty">Loading readings…</td></tr></tbody>
           </table>
         </div>
       </details>
@@ -198,25 +247,31 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
   <section class="panel">
     <h2 id="condTitle">Conditions</h2>
     <div class="ctl">
-      <div class="seg" id="condWin" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+      <div class="seg" id="condWin" data-chart="cond" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
       <label class="tog"><input type="checkbox" id="condRh"> Humidity</label>
     </div>
     <div class="chartbox" id="condBox"><canvas id="cond" role="img" aria-label="Conditions chart"></canvas></div>
     <div class="strip now" id="condNow" hidden></div>
     <p class="src" id="condNote"></p>
   </section>
-  <div class="grid2">
-    <section class="panel">
-      <h2 id="histTitle">History</h2>
-      <div class="chartbox"><canvas id="hist" role="img" aria-label="History chart"></canvas></div>
-      <p class="src" id="histNote"></p>
-    </section>
-    <section class="panel">
-      <h2 id="fcTitle">5-day snowfall forecast</h2>
-      <div class="chartbox"><canvas id="fc" role="img" aria-label="Snowfall forecast chart"></canvas></div>
-      <p class="src" id="fcSource"></p>
-    </section>
-  </div>
+  <section class="panel" id="snowPanel">
+    <h2 id="snowTitle">Snow depth</h2>
+    <div class="ctl">
+      <div class="seg" id="snowWin" data-chart="snow" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+    </div>
+    <div class="chartbox" id="snowBox"><canvas id="snow" role="img" aria-label="Snow depth chart"></canvas></div>
+    <div class="strip now" id="snowNow" hidden></div>
+    <p class="src" id="snowNote"></p>
+  </section>
+  <section class="panel" id="windPanel">
+    <h2 id="windTitle">Wind</h2>
+    <div class="ctl">
+      <div class="seg" id="windWin" data-chart="wind" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+    </div>
+    <div class="chartbox" id="windBox"><canvas id="wind" role="img" aria-label="Wind chart"></canvas></div>
+    <div class="strip now" id="windNow" hidden></div>
+    <p class="src" id="windNote"></p>
+  </section>
   </div>
 
   <details class="panel" id="checks">
@@ -224,7 +279,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     <ul class="checks" id="checkList"><li>Loading…</li></ul>
   </details>
 
-  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Lech, Zürs, Langen Blasegg, Albona and Valluga: <a href="https://warnung.vorarlberg.at" target="_blank" rel="noopener">Lawinenwarndienst Vorarlberg</a>. Avalanche danger: Euregio bulletin (avalanche.report) and LWD Vorarlberg bulletin. St. Anton, Galzig and Langen/Arlberg: <a href="https://data.hub.geosphere.at" target="_blank" rel="noopener">GeoSphere Austria (CC BY 4.0)</a>. Recorded at 07:00, 12:00 and 17:00 (Vienna time).</p>
+  <p class="src">Station data: <a href="https://avalanche.report" target="_blank" rel="noopener">Lawinenwarndienst Tirol (avalanche.report)</a>. Lech, Zürs, Langen Blasegg, Albona and Valluga: <a href="https://warnung.vorarlberg.at" target="_blank" rel="noopener">Lawinenwarndienst Vorarlberg</a>. Avalanche danger: Euregio bulletin (avalanche.report) and LWD Vorarlberg bulletin. St. Anton, Galzig and Langen/Arlberg: <a href="https://data.hub.geosphere.at" target="_blank" rel="noopener">GeoSphere Austria (CC BY 4.0)</a>. Hourly values, times in Vienna time.</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous"></script>

@@ -28,6 +28,17 @@ const slice = (hours, field, id, from, to) => {
 };
 // newest recorded value of a field at or before `to`
 const latest = (hours, field, id, to) => { const lim = viennaKey(to), k = Object.keys(hours).sort().reverse().find(k => k <= lim && hours[k][field]?.[id] != null); return k ? { k, y: hours[k][field][id] } : null; };
+// chart windows in hours (#40) and the x-axis tick spacing (h) for each
+const WINDOWS = [1, 6, 12, 24, 48, 72, 168];
+const winOr = (v, def) => WINDOWS.includes(v) ? v : def;
+const tickStepH = h => ({ 6: 2, 12: 4, 24: 12, 48: 24, 72: 24, 168: 24 })[h];
+// chart bars: hourly HS rise, never negative (settling); gaps stay null. The summary's "new snow" is riseOf, not a sum of these
+const risePts = (hours, id, from, to) => slice(hours, "hr", id, from, to).map(p => ({ ...p, y: p.y == null ? null : Math.max(0, p.y) }));
+// change of a field over the last backH hours: { now, then, d } from the newest values at or before each instant; null if either is missing or both resolve to the same hour (no real comparison)
+const delta = (hours, field, id, now, backH) => {
+  const a = latest(hours, field, id, now), b = latest(hours, field, id, now - backH * H);
+  return a && b && a.k !== b.k ? { now: a.y, then: b.y, d: Math.round((a.y - b.y) * 10) / 10 } : null;
+};
 const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10); // "YYYY-MM-DD" + n days
 // the latest night (18:00-08:00) or day (08:00-18:00) that has ended by `now`, over its full length in hourly.json
 // { date (local date it starts on), pts with data, of = hours in the period (DST-aware, normally 14 / 10) }
@@ -62,4 +73,60 @@ const refreshStale = (lastIso, now) => {
   return last < keyMs((h >= 20 ? k.slice(0, 10) : shift(k.slice(0, 10), -1)) + "T19");
 };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-if (typeof module !== "undefined") module.exports = { STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale };
+// Map zoom tiers (#39): 0 = overview, 1 = values, 2 = names + everything
+const tierOf = (z, fitZ) => z < fitZ + 1 ? 0 : z < fitZ + 2 ? 1 : 2;
+// Greedy pixel grouping: highest rank seeds a group and absorbs unassigned points within px; `keep` stays alone. pts: [{id, x, y, rank}]
+const groupByPixel = (pts, px = 28, keep = null) => {
+  const left = [...pts].sort((a, b) => b.rank - a.rank || (a.id < b.id ? -1 : 1)), out = [];
+  while (left.length) {
+    const seed = left.shift(), ids = [seed.id];
+    if (seed.id !== keep) for (let i = 0; i < left.length;) left[i].id !== keep && Math.hypot(left[i].x - seed.x, left[i].y - seed.y) <= px ? ids.push(left.splice(i, 1)[0].id) : i++;
+    out.push(ids);
+  }
+  return out;
+};
+// lead = deepest non-wind member; one snow-type + one wind-only member = a dot with the wind arrow on it
+const describeGroup = members => {
+  const snowy = members.filter(m => m.type !== "wind"), wind = members.filter(m => m.type === "wind");
+  const lead = snowy.reduce((a, b) => (b.hs ?? -1) > (a.hs ?? -1) ? b : a, snowy[0] || members[0]);
+  return snowy.length === 1 && wind.length === 1 ? { lead, wind: wind[0], count: 1 } : { lead, wind: null, count: members.length };
+};
+// Summary strip (#40): altitude bands, medians, sums over hourly.json
+const bandOf = alt => alt < 1600 ? "valley" : alt <= 2200 ? "mid" : "high";
+const BANDS = [["valley", "Valley", "< 1,600 m"], ["mid", "Mid", "1,600-2,200 m"], ["high", "High", "> 2,200 m"]];
+const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b), m = v.length >> 1; return v.length ? (v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2) : null; };
+const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8];
+// one point per hour key: the repeated 02:00 of the autumn DST change is one hour of data, not two
+const hourPts = (hours, field, id, from, to) => { const s = slice(hours, field, id, from, to); return s.filter((p, i) => s.findIndex(q => q.k === p.k) === i); };
+// hours of `field` in [from, to] that have a value and are not flagged for this station
+const okPts = (hours, field, id, from, to) => hourPts(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
+// hr (HS rise) is clamped at 0 like risePts; of = hours in the window
+const sumField = (hours, field, id, from, to) => { const v = okPts(hours, field, id, from, to).map(p => field === "hr" ? Math.max(0, p.y) : p.y); return { v: v.reduce((a, b) => a + b, 0), n: v.length, of: hourPts(hours, field, id, from, to).length }; };
+// new snow = HS rise above the running maximum (high-water mark) of the unflagged hs values: jitter and settling add nothing, gaps keep the mark.
+// The mark starts at the hour before the window's first hour (the boundary), so the rise from there counts; without a usable boundary it starts at the first in-window value.
+const riseOf = (hours, id, from, to) => { const first = Math.ceil(from / H) * H, b = okPts(hours, "hs", id, first - H, first - H)[0]; let m = b ? b.y : null, v = 0; const pts = okPts(hours, "hs", id, from, to); for (const p of pts) { if (m != null && p.y > m) v += p.y - m; m = m == null ? p.y : Math.max(m, p.y); } return { v, n: pts.length, of: hourPts(hours, "hs", id, from, to).length }; };
+const extremeOf = (hours, field, id, from, to, max) => okPts(hours, field, id, from, to).reduce((a, p) => !a || (max ? p.y > a.y : p.y < a.y) ? p : a, null);
+const r1 = v => v == null ? null : Math.round(v * 10) / 10;
+// per band: n = stations with any data; each metric is the median over the stations that have it (null when none), with its own station count (…N)
+// and, for snow, the median hours with data (…H) out of the window's hours (of): less than `of` means a partial total. Windows are (now-h, now] and (now, now+h].
+const bandStats = (stations, hours, now, h) => {
+  const out = {}, past = [now - h * H + 1, now], next = [now + 1, now + h * H];
+  for (const [b] of BANDS) {
+    const st = stations.filter(s => bandOf(s.alt) === b), has = id => Object.values(hours).some(x => x.hs?.[id] != null);
+    const per = st.map(s => {
+      const hs = has(s.id), a = hs ? riseOf(hours, s.id, ...past) : { n: 0 }, c = hs ? sumField(hours, "sm", s.id, ...next) : { n: 0 };
+      const lo = extremeOf(hours, "lt", s.id, ...past, false), hi = extremeOf(hours, "lt", s.id, ...past, true);
+      return { snowLast: a.n ? a.v : null, snowNext: c.n ? c.v : null, tmin: lo?.y ?? null, tmax: hi?.y ?? null, snowLastH: a.n || null, snowNextH: c.n || null };
+    });
+    out[b] = { n: per.filter(p => ["snowLast", "snowNext", "tmin", "tmax"].some(f => p[f] != null)).length, of: h };
+    for (const f of ["snowLast", "snowNext", "tmin", "tmax"]) { out[b][f] = r1(median(per.map(p => p[f]))); out[b][f + "N"] = per.filter(p => p[f] != null).length; }
+    for (const f of ["snowLastH", "snowNextH"]) out[b][f] = median(per.map(p => p[f])) == null ? null : Math.round(median(per.map(p => p[f])));
+  }
+  return out;
+};
+// strongest gust (wg_boe) over the stations and the past window, with its direction; first station wins a tie
+const strongestGust = (hours, stations, now, h) => stations.reduce((a, s) => {
+  const e = extremeOf(hours, "wg_boe", s.id, now - h * H + 1, now, true);
+  return e && (!a || e.y > a.y) ? { y: e.y, id: s.id, k: e.k, wr: hours[e.k]?.wr?.[s.id] ?? null } : a;
+}, null);
+if (typeof module !== "undefined") module.exports = { tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust };

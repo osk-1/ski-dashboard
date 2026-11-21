@@ -34,9 +34,8 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible(); // station dots
 
       // select a station (the select works at every width) and check both charts draw
-      const options = await page.locator("#stnSel option").evaluateAll((o) => o.map((x) => x.value));
-      await page.selectOption("#stnSel", options[options.length > 1 ? 1 : 0]);
-      for (const id of ["hist", "fc"]) {
+      await page.selectOption("#stnSel", "SKAP2"); // a station with snow depth; wind-only stations hide the snow panel
+      for (const id of ["cond", "snow"]) {
         await expect.poll(() => page.evaluate((i) => !!Chart.getChart(i), id)).toBe(true);
         await expect(page.locator(`#${id}`)).toBeVisible();
       }
