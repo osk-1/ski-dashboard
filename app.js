@@ -59,8 +59,9 @@ function renderSummary() {
     + stat(gg?.lt != null ? `${gg.lt} °C` : "–", gg?.lt != null ? `Galzig now · ${fmtHour(Date.parse(gz.dates?.lt || gz.date))}` : "Galzig now · no current value")
     + stat(snowNext?.n ? `+${Math.round(snowNext.v)} cm` : "–", `Galzig next 24 h${tLo ? ` · ${Math.round(tLo.y)} / ${Math.round(tHi.y)} °C` : ""}`)
     + stat(dh ? `${sign(dh.d)} cm` : "–", "Ulmerhütte snow 24 h");
-  if (sheetOn()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } // the peek fits the header
+  fitPeek();
 }
+function fitPeek() { if (sheetOn()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } } // the peek fits the header (overview or station card)
 document.getElementById("sumWin").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   sumH = winOr(+b.dataset.h, sumH);
@@ -174,7 +175,7 @@ const refreshMap = () => { map.invalidateSize(); if (sheetOn()) map.dragging.ena
 const sheetWin = () => { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; }; // one shared window; notes behind "About this chart"
 const placeSheet = () => {
   document.documentElement.classList.toggle("sheet", sheetOn());
-  if (sheetOn()) { document.body.prepend(mapPanel); document.body.append(card); sheetWin(); } else { closeCard(false); panelHome.prepend(mapPanel); mapPanel.append(card); }
+  if (sheetOn()) { document.body.prepend(mapPanel); document.querySelector("header").append(card); sheetWin(); } else { closeCard(false); panelHome.prepend(mapPanel); mapPanel.append(card); }
 };
 placeSheet();
 sheetMq.addEventListener("change", () => { placeSheet(); if (map) { refreshMap(); renderCharts(); } });
@@ -194,7 +195,7 @@ document.getElementById("chartTabs").addEventListener("click", e => {
 const sheetPeek = () => sheetOn() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
 addEventListener("keydown", e => { if (e.key === "Escape" && sheetOn() && card.classList.contains("open")) closeCard(); });
 addEventListener("orientationchange", () => { if (map) refreshMap(); });
-// Station card: a tap on a station opens it instead of selecting; Open charts selects and raises the sheet.
+// Station card (phones): a tap on a station swaps the overview in the sheet for its card and selects it; swipe up for the charts, X returns to the overview.
 const scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
 
 function openCard(id) {
@@ -211,24 +212,18 @@ function openCard(id) {
     if (g[f] == null && !bad && !(f === "hs" && s.type === "snow")) return ""; // hide what this station type does not measure
     return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + mm(f, fmt) + "</div>";
   }).join("");
-  if (sheetOn()) { scrollTo(0, 0); // the sheet is locked while the card is open (CSS), so lower it first
-    map.panInside([s.lat, s.lon], { paddingBottomRight: [0, card.offsetHeight + 24 + Math.max(0, map.getContainer().getBoundingClientRect().bottom - innerHeight)], animate: false }); } // the card covers the map's bottom; offsetHeight ignores its slide-in transform
-  renderMap(); card.classList.add("open"); card.focus();
+  card.classList.add("open");
+  if (!sheetOn()) renderMap(); // the sheet renders the map in select()
+  else { if (s.type === "wind") tab = "wind"; /* memory only, not saved */ select(id); scrollTo(0, 0); fitPeek(); // the charts below follow the station; the lowered sheet shows the card
+    map.panInside([s.lat, s.lon], { paddingBottomRight: [0, sheetPeek() + 24], animate: false }); }
+  card.focus({ preventScroll: true });
 }
 function closeCard(refocus = true) {
   if (!card.classList.contains("open")) return;
-  card.classList.remove("open"); const id = cardId; cardId = undefined; renderMap();
+  card.classList.remove("open"); const id = cardId; cardId = undefined; renderMap(); fitPeek();
   if (refocus) document.querySelector(`#map [data-sid="${CSS.escape(id)}"]`)?.focus();
 }
 document.getElementById("scClose").onclick = () => closeCard();
-document.getElementById("scOpen").onclick = () => {
-  const id = cardId, s = state.stations.find(x => x.id === id); closeCard(false); // closeCard clears cardId
-  // a station of type "wind" opens on Wind; kept in memory only (not saved), so later refreshes keep it and a reload returns to the saved tab
-  if (sheetOn() && s?.type === "wind") tab = "wind";
-  select(id);
-  // instant ("auto"): honours prefers-reduced-motion
-  requestAnimationFrame(() => requestAnimationFrame(() => (sheetOn() ? chartsec : document.getElementById("condTitle")).scrollIntoView({ block: "start", behavior: "auto" })));
-};
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];

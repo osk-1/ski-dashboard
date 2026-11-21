@@ -110,9 +110,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 }
 #stationCard { display: none; }
 .glance, .ctabs, .note > summary, .read { display: none; } /* sheet only (below); elsewhere the notes stay open with no summary */
-html.sheet #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
-html.sheet #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
-@media (prefers-reduced-motion: reduce) { html.sheet #stationCard, html.sheet #stationCard.open { transition: none; } }
+html.sheet #stationCard.open { display: block; } /* phones: the card sits in the header and replaces the overview glance while open */
 /* bottom sheet (html.sheet, phones; app.js): map fixed full screen, the page (.wrap) scrolls over it from --peek */
 @media (max-width: 820px), (max-height: 500px) and (orientation: landscape) {
   html.sheet { --peek: 150px; scroll-snap-type: y proximity; }
@@ -122,8 +120,7 @@ html.sheet #stationCard.open { visibility: visible; transform: none; transition:
   html.sheet #map .leaflet-top { margin-top: env(safe-area-inset-top); }
   html.sheet #mapPanel .legend { position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--peek) + 8px + 100lvh - 100svh); margin: 0; padding: 4px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
   html.sheet .wrap { position: relative; z-index: 1; margin-top: calc(100svh - var(--peek)); padding-top: 10px; background: var(--bg); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); scroll-snap-align: start; }
-  html.sheet:has(#stationCard.open) { overflow: hidden; } /* the card and the sheet never move together */
-  html.sheet #stationCard { position: fixed; z-index: 3; box-shadow: 0 -4px 16px rgb(0 0 0 / .18); } /* moved to <body> (app.js): over the sheet */
+  html.sheet:has(#stationCard.open) :is(.glance, #updated) { display: none; }
   html.sheet header { display: block; } html.sheet #dangerChip { display: none; } /* danger is in the glance */
   html.sheet .glance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   html.sheet .glance .stat b { font-size: 1.35rem; white-space: nowrap; } html.sheet .glance .dg { display: inline-block; font: 600 .85rem/1.6 var(--body); text-transform: none; letter-spacing: 0; color: #142030; } html.sheet .glance .dg4 { color: #fff; } html.sheet .glance .dg5 { color: #ff0000; }
@@ -159,7 +156,6 @@ html.sheet #stationCard.open { visibility: visible; transform: none; transition:
 #stationCard .scr small { grid-column: 2 / 4; text-align: right; color: var(--muted); font-size: .8rem; margin-top: -4px; }
 #stationCard .scr b.nd { grid-column: 2 / 4; color: var(--muted); font-weight: 600; text-align: right; } #stationCard .scr i { color: var(--muted); font-style: normal; font-size: .85rem; min-width: 3.5em; text-align: right; }
 #stationCard button { min-width: 44px; min-height: 44px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font: 600 .95rem/1 var(--body); cursor: pointer; }
-#stationCard #scOpen { padding: 0 12px; color: var(--bg); background: var(--accent); border-color: var(--accent); }
 #stationCard button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .legend i.b { box-shadow: inset 0 0 0 1px var(--line); } /* the <1 cm band is transparent on the map: empty box */
@@ -248,7 +244,7 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
       <div id="map"><div class="empty">Loading map…</div></div>
       <div class="legend" id="legend"></div>
       <section id="stationCard" aria-labelledby="scTitle" tabindex="-1">
-        <div class="sc-h"><div><h3 id="scTitle">Station</h3><p id="scAlt"></p></div><button type="button" id="scOpen">Open charts</button><button type="button" id="scClose" aria-label="Close station card">✕</button></div>
+        <div class="sc-h"><div><h3 id="scTitle">Station</h3><p id="scAlt"></p></div><button type="button" id="scClose" aria-label="Close station card">✕</button></div>
         <div id="scRows"></div>
       </section>
     </section>
