@@ -14,7 +14,7 @@ const win = { cond: 24, snow: 72, wind: 24 }; // chart windows in hours, one swi
 const winKey = k => k + "H"; // localStorage keys condH, snowH, windH
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
-let cardId; const hl = () => cardId ?? state.selected; // map highlight: the card preview, else the selection
+let cardId; const hl = () => cardId ?? (sheetOn() ? null : state.selected); // map highlight: the card preview, else the selection (the sheet: none, the map is the overview)
 for (const k in win) try { win[k] = winOr(+localStorage.getItem(winKey(k)), win[k]); } catch {}
 
 let chgH = 24, sortBy = { k: "alt", dir: -1 }; // table: change window (hours back) and sort, sort is not persisted
@@ -49,6 +49,16 @@ function renderSummary() {
     + (g ? stat(`${Math.round(g.y)} km/h`, `Strongest gust, last ${sumH} h · ${esc(gs?.name ?? g.id)} · ${g.wr == null ? "direction unknown" : `<span style="display:inline-block;transform:rotate(${(g.wr + 180) % 360}deg)" aria-hidden="true">↑</span> from ${compass(g.wr)}`} · ${fmtSlot(keyMs(g.k))}`)
       : `<div class="stat"><b title="No data in this window">–</b><span>Strongest gust, last ${sumH} h</span></div>`)
     + (cards || '<p class="src xl">No station data in this window.</p>') + note;
+  // sheet peek: today's danger in the three Tirol regions around St. Anton (only while current), Galzig now and its next 24 h (model), Ulmerhütte HS change over 24 h
+  const D = 24 * 3600e3, gz = all.find(x => x.id === "TAWES-11110"), ul = all.find(x => x.id === "SAUL2"), gg = gz && goodOnly(gz, Date.now()), ug = ul && goodOnly(ul, Date.now());
+  const regs = ["AT-07-07", "AT-07-10", "AT-07-11"].map(k => state.danger?.regions?.[k]).filter(r => r && new Date(r.valid_end) >= new Date());
+  const snowNext = gz && sumField(hours, "sm", gz.id, now + 1, now + D), tLo = gz && extremeOf(hours, "mt", gz.id, now + 1, now + D, false), tHi = gz && extremeOf(hours, "mt", gz.id, now + 1, now + D, true);
+  const dh = ug && ug.hs != null ? delta(hours, "hs", ul.id, now, 24) : null, sign = v => (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(Math.round(v));
+  document.getElementById("glance").innerHTML = regs.map(r => stat(dchip(Math.max(0, ...r.ratings.map(x => x.level))), esc(r.name.replace(" Mountains", "")))).join("")
+    + stat(gg?.lt != null ? `${gg.lt} °C` : "–", gg?.lt != null ? `Galzig now · ${fmtHour(Date.parse(gz.dates?.lt || gz.date))}` : "Galzig now · no current value")
+    + stat(snowNext?.n ? `+${Math.round(snowNext.v)} cm` : "–", `Galzig next 24 h${tLo ? ` · ${Math.round(tLo.y)} / ${Math.round(tHi.y)} °C` : ""}`)
+    + stat(dh ? `${sign(dh.d)} cm` : "–", "Ulmerhütte snow 24 h");
+  if (sheetOn()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } // the peek fits the header
 }
 document.getElementById("sumWin").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -59,15 +69,18 @@ document.getElementById("sumWin").addEventListener("click", e => {
 
 const DG = ["No rating", "Low", "Moderate", "Considerable", "High", "Very high"];
 const dchip = (l, t = "") => `<span class="dg dg${l}">${l ? l + " " : ""}${t || DG[l]}</span>`;
+// highest level over the current bulletins (all of them when none is current: old); null without bulletins
+// per region: one bulletin can be current while the other is a leftover from an earlier run
+const dangerNow = () => { const rs = Object.entries(state.danger?.regions || {}); if (!rs.length) return null;
+  const cur = rs.filter(([, r]) => new Date(r.valid_end) >= new Date()), old = !cur.length;
+  return { rs, old, mx: Math.max(0, ...(old ? rs : cur).flatMap(([, r]) => r.ratings.map(x => x.level))) }; };
 function renderDanger() {
-  const rs = Object.entries(state.danger?.regions || {}), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
-  box.hidden = top.hidden = !rs.length;
-  if (!rs.length) return;
-  // per region: one bulletin can be current while the other is a leftover from an earlier run
-  const stale = r => new Date(r.valid_end) < new Date(), cur = rs.filter(([, r]) => !stale(r)), old = !cur.length;
+  const d = dangerNow(), box = document.getElementById("danger"), top = document.getElementById("dangerChip");
+  box.hidden = top.hidden = !d;
+  if (!d) return;
+  const { rs, old, mx } = d, stale = r => new Date(r.valid_end) < new Date();
   const fmt = r => new Date(r.valid_end).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Vienna" });
   const day = fmt(rs[0][1]);
-  const mx = Math.max(0, ...(old ? rs : cur).flatMap(([, r]) => r.ratings.map(x => x.level)));
   top.className = "meta" + (old ? " old" : "");
   top.innerHTML = `Avalanche danger ${dchip(mx)}` + (old ? ` Last bulletin: ${day}, not current` : "");
   box.className = "panel" + (old ? " old" : "");
@@ -156,7 +169,29 @@ function nsShow() {
 }
 // Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
 let fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
-const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs || sheetOn()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+// Bottom-sheet prototype (?sheet=1 on, ?sheet=0 off, remembered): on phones the map fills the screen and the page scrolls over it as a sheet.
+// The panel moves to the top of <body> so the sheet (.wrap) can stack above it; the full-screen mode stays for the non-sheet layout.
+let sheetPref = false;
+try { const q = new URLSearchParams(location.search).get("sheet"); if (q != null) localStorage.setItem("sheet", q); sheetPref = localStorage.getItem("sheet") === "1"; } catch {}
+const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), sheetOn = () => sheetPref && sheetMq.matches;
+if (sheetPref) { document.documentElement.classList.add("sheet"); document.body.prepend(fsPanel); }
+sheetMq.addEventListener("change", () => { if (map) fsRefresh(); });
+if (sheetOn()) { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; } // one shared window; notes behind "About this chart"
+// sheet: one chart at a time (tabs); a tab whose panel the station lacks (no snow / wind) falls back to Conditions
+let tab = "cond";
+try { tab = localStorage.getItem("tab") || "cond"; } catch {}
+const chartsec = document.querySelector(".chartsec"), showTab = () => {
+  if (tab !== "cond" && document.getElementById(tab + "Panel").hidden) tab = "cond";
+  chartsec.dataset.tab = tab;
+  for (const b of document.getElementById("chartTabs").children) { b.setAttribute("aria-pressed", b.dataset.tab === tab); b.hidden = document.getElementById(b.dataset.tab + "Panel").hidden; }
+};
+document.getElementById("chartTabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  tab = b.dataset.tab; try { localStorage.setItem("tab", tab); } catch {}
+  showTab(); const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[tab](s); // drawn while hidden: re-lay out at its real width
+});
+const sheetPeek = () => sheetOn() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
 // keyboard focus stays in the panel: everything beside it (and beside each ancestor) is inert while in full screen
 const fsInert = on => { for (let e = fsPanel; e.parentElement && e !== document.body; e = e.parentElement) for (const x of e.parentElement.children) if (x !== e) x.inert = on; };
 function enterFs() {
@@ -177,22 +212,27 @@ function exitFs() {
 }
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = () => setLegend(!legendOpen());
-addEventListener("keydown", e => { if (e.key === "Escape" && fs) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card (CSS mode; in API full screen the browser takes Escape and fullscreenchange exits)
+addEventListener("keydown", e => { if (e.key === "Escape" && (fs || sheetOn())) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card (CSS mode; in API full screen the browser takes Escape and fullscreenchange exits)
 addEventListener("popstate", () => { if (fsBack) { fsBack = false; return; } fsPushed = false; exitFs(); }); // fsBack: the pop our own history.back() causes must not close a session entered since
 addEventListener("orientationchange", () => { if (map) fsRefresh(); });
 document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
-// Station card (full screen only): a tap on a station opens it instead of selecting; Open charts leaves full screen and selects.
+// Station card (full screen and the sheet): a tap on a station opens it instead of selecting; Open charts leaves full screen (raises the sheet) and selects.
 const card = document.getElementById("stationCard"), scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
+if (sheetPref) document.body.append(card); // above the sheet, which stacks above the map panel
 
 function openCard(id) {
   const s = state.stations.find(x => x.id === id); if (!s) return;
   cardId = id; // renderMap highlights it via hl(); state.selected only changes in select()
-  const g = goodOnly(s, Date.now());
+  const g = goodOnly(s, Date.now()), hours = state.hourly?.hours || {}, now = anchorMs(hours, Date.now());
+  // range of the last 24 h from the unflagged hourly values and the current good value (not for direction or the 24 h new-snow sum)
+  const mm = (f, fmt) => { const lo = f !== "wr" && f !== "n24" && extremeOf(hours, f, id, now - 24 * 3600e3, now, false), hi = lo && extremeOf(hours, f, id, now - 24 * 3600e3, now, true);
+    const v = [lo?.y, hi?.y, g[f]].filter(x => x != null); // the live value can be newer than the last hourly one
+    return lo ? `<small>24 h: min ${fmt(Math.min(...v))} · max ${fmt(Math.max(...v))}</small>` : ""; };
   document.getElementById("scTitle").textContent = s.name; document.getElementById("scAlt").textContent = `${s.alt} m`;
   document.getElementById("scRows").innerHTML = scRows.map(([f, fmt]) => {
     const bad = g.bad[f], label = FN[f][0].toUpperCase() + FN[f].slice(1);
     if (g[f] == null && !bad && !(f === "hs" && s.type === "snow")) return ""; // hide what this station type does not measure
-    return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + "</div>";
+    return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + mm(f, fmt) + "</div>";
   }).join("");
   renderMap(); card.classList.add("open"); card.focus();
 }
@@ -203,18 +243,18 @@ function closeCard(refocus = true) {
 }
 document.getElementById("scClose").onclick = () => closeCard();
 document.getElementById("scOpen").onclick = () => {
-  const id = cardId; exitFs(); select(id); // exitFs closes the card (cardId cleared)
+  const id = cardId; closeCard(false); exitFs(); select(id); // closeCard clears cardId (exitFs does nothing in the sheet)
   // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
-  requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("condTitle").scrollIntoView({ block: "start", behavior: "auto" })));
+  requestAnimationFrame(() => requestAnimationFrame(() => (sheetOn() ? chartsec : document.getElementById("condTitle")).scrollIntoView({ block: "start", behavior: "auto" })));
 };
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
-  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
+  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile || sheetOn() }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
   const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
   fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
-  const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40] }); }; // extra left padding keeps the view clear of the zoom/reset controls
+  const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40 + sheetPeek()] }); }; // extra left padding keeps the view clear of the zoom/reset controls; bottom: the lowered sheet
   const fit = () => { reset(); fitZ = map.getZoom(); map.setMinZoom(fitZ - 1); };
   fit();
   let timer;
@@ -339,7 +379,7 @@ function renderMap() {
     taken.splice(taken.indexOf(lm.box), 1); lm.box = place(lm); taken.push(lm.box);
   }
   const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : pick(n.lead.id); }; // overlapping pads: nearest group or station wins
-  const pick = id => fs ? openCard(id) : select(id);
+  const pick = id => fs || sheetOn() ? openCard(id) : select(id);
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
   for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {
@@ -457,6 +497,7 @@ function renderCharts() {
   renderCond(s);
   renderSnow(s);
   renderWind(s);
+  showTab();
 }
 
 const fmtHour = (t, day) => new Date(t).toLocaleString("en-GB", { ...(day ? { weekday: "short", day: "numeric" } : { hour: "2-digit", minute: "2-digit" }), timeZone: "Europe/Vienna" });
@@ -485,7 +526,11 @@ const fade = c => `color-mix(in srgb, ${c} 30%, transparent)`;
 const flagAt = x => x.chart.data.datasets[x.datasetIndex].data[x.p0DataIndex]?.fl || x.chart.data.datasets[x.datasetIndex].data[x.p1DataIndex]?.fl;
 const measLine = (hours, id, pts, f, label, unit, c, o = {}) => ({ label, unit, kind: "measured", src: `measured · ${srcOf(id)}`, data: pts.map(p => ({ ...p, fl: hours[p.k]?.flags?.[id]?.[f] })), borderColor: c, backgroundColor: c, borderWidth: 2,
   pointRadius: x => x.raw?.fl ? 3.5 : 0, pointBackgroundColor: css("--panel"), pointBorderColor: css("--fg"), pointBorderWidth: 1.5, segment: { borderColor: x => flagAt(x) ? fade(c) : undefined }, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y", ...o });
-const barSet = (label, unit, data, o) => ({ type: "bar", label, unit, data, order: 2, barPercentage: 1, categoryPercentage: .8, ...o });
+// bars over long windows: 3 h sums at 72 h, daily sums at 7 d (a bar per hour would be under 1 px wide)
+const bins = (pts, h, extra) => h >= 72 ? binSum(pts, h >= 168 ? 24 : 3, extra) : pts;
+const binTitle = r => (r.x1 - r.x0 > 3 * 3600e3 ? new Date(r.x0).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "Europe/Vienna" }) + ", day total" : `${fmtSlot(r.x0)}–${fmtHour(r.x1 + 3600e3)}`)
+  + (r.n < r.of ? ` · ${r.n} of ${r.of} h with data` : "");
+const barSet = (label, unit, data, o) => ({ type: "bar", label, unit, data, order: 2, barPercentage: 1, categoryPercentage: .8, grouped: data[0]?.x0 == null, ...o }); // bins: measured and model bars of the current bin overlap at its middle instead of halving every bar
 const statHtml = (t, name, small, bad) => `<div class="stat"><b>${bad ? `<s class="bad">${t}</s>` : t}</b><span>${name}</span><small>${small}</small></div>`;
 // each model field has its own source and issue time (hourly.json model.fields: a MET Norway fallback run does not provide sd/sm); old data without fields: the latest run's
 const modelOf = f => { const m = state.hourly?.model || {}; return m.fields?.[f] ?? m; };
@@ -504,7 +549,7 @@ function latestCard(s, f, name, u, hours, now, gauge) {
   return statHtml(v ? `${esc(v.y)} ${u}` : "–", name, `${when}${fl ? ` · suspect: ${esc(fl)}` : old ? " · not current" : ""}`, fl || old);
 }
 // tooltip shared by the three charts: value, time, source (kind = measured | model, set on each dataset); the direction dataset is not hit-tested
-const tip = (o = {}) => ({ filter: i => i.parsed.y != null && !i.dataset.noTip, callbacks: { title: it => fmtSlot(it[0].parsed.x),
+const tip = (o = {}) => ({ filter: i => i.parsed.y != null && !i.dataset.noTip, callbacks: { title: it => it[0].raw?.x0 != null ? binTitle(it[0].raw) : fmtSlot(it[0].parsed.x),
   label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.fl ? ` · suspect: ${c.raw.fl}` : ""}`, footer: it => [...new Set(it.map(i => i.dataset.src))], ...o } });
 // next model hour of field f as a stat card
 const nextCard = (hours, id, now, f, name, u) => {
@@ -541,9 +586,9 @@ function renderCond(s) {
   const oft = hasOft && ln("oft", "Snow surface", "°C", accent);
   const rh = el("condRh").checked && ln("rh", "Humidity", "%", muted, { borderWidth: 1, yAxisID: "yH" });
   const bar = (label, unit, data, o) => barSet(label, unit, data, { yAxisID: "yP", ...o });
-  const pr = bar(gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm", past(pf), { backgroundColor: rain, kind: "measured", src: `measured · ${srcOf(id)}` });
+  const pr = bar(gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm", bins(past(pf), condH), { backgroundColor: rain, kind: "measured", src: `measured · ${srcOf(id)}` });
   const sameRun = modelSrcOf("sm") === modelSrcOf("pm"); // after a fallback sm is an older Open-Meteo run: never shown as this bar's snow
-  const pm = bar("Precip. · model", "mm", slice(hours, "pm", id, from, to).map(p => ({ ...p, sm: sameRun ? hours[p.k]?.sm?.[id] : undefined })), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, kind: "model", src: modelSrcOf("pm") });
+  const pm = bar("Precip. · model", "mm", bins(slice(hours, "pm", id, from, to).map(p => ({ ...p, sm: sameRun ? hours[p.k]?.sm?.[id] : undefined })), condH, ["sm"]), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, kind: "model", src: modelSrcOf("pm") });
   const hasModel = nn(mt.data) || nn(pm.data);
   const sets = [lt, oft, rh, mt, pr, pm].filter(d => d && (d === lt || nn(d.data)));
   const zero = { color: c => c.tick.value === 0 ? css("--fg") : css("--line"), lineWidth: c => c.tick.value === 0 ? 1.5 : 1 };
@@ -593,9 +638,9 @@ function renderSnow(s) {
   }
   const from = now - h * 3600e3, to = now + h * 3600e3, accent = css("--accent"), rain = css("--snow-2"), rainM = css("--snow-3");
   const hsL = measLine(hours, id, slice(hours, "hs", id, from, now), "hs", "Snow height", "cm", accent);
-  const rise = barSet("Snow depth rise", "cm", risePts(hours, id, from, now), { backgroundColor: rain, yAxisID: "yR", kind: "measured", src: `measured · ${srcOf(id)}` });
+  const rise = barSet("Snow depth rise", "cm", bins(risePts(hours, id, from, now), h), { backgroundColor: rain, yAxisID: "yR", kind: "measured", src: `measured · ${srcOf(id)}` });
   const sd = { label: "Depth · model", unit: "cm", kind: "model", src: modelSrcOf("sd"), data: slice(hours, "sd", id, now + 1, to), borderColor: accent, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 8, spanGaps: false, yAxisID: "y" };
-  const sm = barSet("Snowfall · model", "cm", slice(hours, "sm", id, now + 1, to), { backgroundColor: "transparent", borderColor: rainM, borderWidth: h >= 72 ? 1 : 1.5, barPercentage: h >= 72 ? .6 : 1, yAxisID: "yR", kind: "model", src: modelSrcOf("sm") });
+  const sm = barSet("Snowfall · model", "cm", bins(slice(hours, "sm", id, now + 1, to), h), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, yAxisID: "yR", kind: "model", src: modelSrcOf("sm") });
   const sets = [hsL, sd, rise, sm].filter(d => nn(d.data));
   el("snow").setAttribute("aria-label", `Snow depth chart, ${h} hours either side of now`);
   charts.snow = new Chart(el("snow"), {
@@ -603,10 +648,10 @@ function renderSnow(s) {
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearestX", intersect: false },
       plugins: { legend, tooltip: tip() },
       scales: { x: timeAxis(from, to, h), y: { beginAtZero: true, grace: "5%", title: { display: true, text: "cm" } },
-        ...(nn(rise.data) || nn(sm.data) ? { yR: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: "cm / h" } } } : {}) } },
+        ...(nn(rise.data) || nn(sm.data) ? { yR: { position: "right", beginAtZero: true, grid: { display: false }, title: { display: true, text: h >= 168 ? "cm / day" : h >= 72 ? "cm / 3 h" : "cm / h" } } } : {}) } },
   });
   el("snowNote").textContent = [
-    nn(hsL.data) ? `Line: measured snow height (${srcOf(id)}); bars: hourly rise, never negative.` : "No snow height measured in this window.",
+    nn(hsL.data) ? `Line: measured snow height (${srcOf(id)}); bars: ${h >= 168 ? "daily" : h >= 72 ? "3-hourly" : "hourly"} rise, never negative.` : "No snow height measured in this window.",
     nn(sd.data) ? "" : "No forecast for snow depth.", nn(sm.data) ? "" : "No forecast for snowfall.",
     nn(sd.data) || nn(sm.data) ? `Dashed / outlined: ${modelSrcs(...(nn(sd.data) ? ["sd"] : []), ...(nn(sm.data) ? ["sm"] : []))}.` : "",
     ...(hsL.data.some(p => p.fl) ? ["Faded points failed a plausibility check (tap one for the reason)."] : []),
@@ -714,7 +759,8 @@ document.getElementById("stnSel").addEventListener("change", e => select(e.targe
 document.addEventListener("click", e => { // every .seg[data-chart] window switch
   const b = e.target.closest(".seg[data-chart] button"); if (!b) return;
   const k = b.closest(".seg").dataset.chart; win[k] = winOr(+b.dataset.h, win[k]);
-  try { localStorage.setItem(winKey(k), win[k]); } catch {}
+  for (const x of sheetOn() ? Object.keys(win) : [k]) { win[x] = win[k]; try { localStorage.setItem(winKey(x), win[x]); } catch {} } // the sheet: one shared window
+  if (sheetOn()) return renderCharts();
   const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[k]?.(s);
 });
 document.getElementById("condRh").addEventListener("change", () => condRedraw());

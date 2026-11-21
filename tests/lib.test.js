@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust } = require("../lib.js");
+const { binSum, tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -220,4 +220,12 @@ test("sumField / riseOf: the repeated 02:00 of the autumn DST change counts once
   assert.equal(viennaKey(from), viennaKey(from + 3600e3)); // two instants, one key
   const h = { "2026-10-25T02": { sm: { A: 2 } }, "2026-10-25T03": { sm: { A: 1 } } };
   assert.deepEqual(sumField(h, "sm", "A", from, to), { v: 3, n: 2, of: 2 });
+});
+
+test("binSum: Vienna-day and 3 h bins, null only when a bin has no value, extra fields summed", () => {
+  const pts = [["2026-11-20T22", 1], ["2026-11-20T23", null], ["2026-11-21T00", 2], ["2026-11-21T01", 0.25], ["2026-11-21T02", null], ["2026-11-21T03", null]].map(([k, y]) => ({ x: keyMs(k), y, k, sm: y && y * 2 }));
+  const d = binSum(pts, 24, ["sm"]);
+  assert.deepEqual(d.map(b => [b.y, b.n, b.of, b.sm]), [[1, 1, 2, 2], [2.3, 2, 4, 4.5]]);
+  assert.equal(d[0].x, keyMs("2026-11-20T12")); assert.equal(binSum(pts, 3)[1].x, keyMs("2026-11-21T00") + 1.5 * 3600e3);
+  assert.deepEqual(binSum(pts, 3).map(b => [b.y, b.of]), [[1, 2], [2.3, 3], [null, 1]]);
 });
