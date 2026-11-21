@@ -19,8 +19,9 @@ for (const mode of ["css", "api"]) for (const vp of VIEWPORTS) for (const scheme
     await page.evaluate(() => window.scrollTo(0, 120)); await btn.scrollIntoViewIfNeeded(); const y0 = await page.evaluate(() => scrollY);
     expect(await page.evaluate(() => map.dragging.enabled())).toBe(false);
 
-    const enter = async () => { await btn.click(); await expect(btn).toHaveAttribute("aria-pressed", "true"); await settle(page); };
-    const exited = async () => { await expect(btn).toHaveAttribute("aria-pressed", "false"); await expect(page.locator("#mapPanel")).not.toHaveClass(/fs/); await settle(page); expect(await page.evaluate(() => scrollY)).toBe(y0); expect(await page.evaluate(() => map.dragging.enabled())).toBe(false); await expect(btn).toBeFocused(); };
+    const enter = async () => { await btn.click(); await expect(btn).toHaveAttribute("aria-pressed", "true"); await settle(page);
+      expect(await page.evaluate(() => [!!document.getElementById("tbl").closest("[inert]"), !!document.getElementById("mapPanel").closest("[inert]")])).toEqual([true, false]); }; // keyboard focus cannot leave the panel
+    const exited = async () => { await expect(btn).toHaveAttribute("aria-pressed", "false"); await expect(page.locator("#mapPanel")).not.toHaveClass(/fs/); await settle(page); expect(await page.evaluate(() => scrollY)).toBe(y0); expect(await page.evaluate(() => map.dragging.enabled())).toBe(false); await expect(btn).toBeFocused(); expect(await page.evaluate(() => document.querySelector("[inert]"))).toBeNull(); };
     const fills = async (w, h) => {
       expect(await box(page, "#mapPanel")).toEqual({ x: 0, y: 0, w, h });
       const ex = await box(page, "#fsExit"); expect(ex.w).toBeGreaterThanOrEqual(44); expect(ex.h).toBeGreaterThanOrEqual(44);

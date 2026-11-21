@@ -38,12 +38,12 @@ function renderSummary() {
   const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
   const deep = s.length ? s.reduce((a, b) => b.hs > a.hs ? b : a) : null;
   // every placed station of any type, independent of the map layers; hourly flags are limit checks only, so a station whose gust is flagged now (frozen, stuck) is left out of the gust
-  const all = placed(), bs = bandStats(all, hours, now, sumH), src = modelOf("sm").source || "source unknown";
+  const all = placed(), bs = bandStats(all, hours, now, sumH), src = modelSrcOf("sm");
   const t = v => v == null ? "–" : v, g = strongestGust(hours, all.filter(x => !x.flags?.wg_boe && !x.flags?.wg), now, sumH), gs = g && all.find(x => x.id === g.id);
   const cov = (hh, of, n, all) => `${hh != null && hh < of ? ` · ${hh} of ${of} h` : ""}${n && n !== all ? ` · n=${n}` : ""}`;
   const cards = BANDS.filter(([k]) => bs[k].n > 0).map(([k, name, rng]) => { const r = bs[k]; return `<div class="stat band"><h3>${name} (${rng}) · ${r.n} station${r.n > 1 ? "s" : ""} <small>n=${r.n}, median</small></h3>
     <div><b${r.snowLast == null ? ' title="No data in this window"' : ""}>${r.snowLast == null ? "–" : `+${r.snowLast} cm`}</b><span>New snow last ${sumH} h, measured${cov(r.snowLastH, r.of, r.snowLastN, r.n)}</span></div>
-    <div><b${r.snowNext == null ? ' title="No forecast for these stations"' : ""}>${r.snowNext == null ? "–" : `+${r.snowNext} cm`}</b><span>Next ${sumH} h, model · ${esc(src)}${cov(r.snowNextH, r.of, r.snowNextN, r.n)}</span></div>
+    <div><b${r.snowNext == null ? ' title="No forecast for these stations"' : ""}>${r.snowNext == null ? "–" : `+${r.snowNext} cm`}</b><span>Next ${sumH} h, ${esc(src)}${cov(r.snowNextH, r.of, r.snowNextN, r.n)}</span></div>
     <div><b${r.tmin == null ? ' title="No data in this window"' : ""}>${t(r.tmin)} / ${t(r.tmax)} °C</b><span>Min / max last ${sumH} h, measured${cov(null, 0, r.tminN, r.n)}</span></div></div>`; }).join("");
   el.innerHTML = stat(deep ? `${Math.round(deep.hs)} cm` : "–", deep ? `Deepest · ${esc(deep.name)}` : "Deepest station")
     + (g ? stat(`${Math.round(g.y)} km/h`, `Strongest gust, last ${sumH} h · ${esc(gs?.name ?? g.id)} · ${g.wr == null ? "direction unknown" : `<span style="display:inline-block;transform:rotate(${(g.wr + 180) % 360}deg)" aria-hidden="true">↑</span> from ${compass(g.wr)}`} · ${fmtSlot(keyMs(g.k))}`)
@@ -157,16 +157,18 @@ function nsShow() {
 // Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
 let fs = false, fsPushed = false, fsBack = false, fsY = 0, fsBtn;
 const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+// keyboard focus stays in the panel: everything beside it (and beside each ancestor) is inert while in full screen
+const fsInert = on => { for (let e = fsPanel; e.parentElement && e !== document.body; e = e.parentElement) for (const x of e.parentElement.children) if (x !== e) x.inert = on; };
 function enterFs() {
   if (fs) return;
-  fs = true; fsY = scrollY; fsPanel.classList.add("fs"); document.documentElement.classList.add("fs-lock"); fsBtn.setAttribute("aria-pressed", "true");
+  fsInert(true); fs = true; fsY = scrollY; fsPanel.classList.add("fs"); document.documentElement.classList.add("fs-lock"); fsBtn.setAttribute("aria-pressed", "true");
   fsPanel.requestFullscreen?.()?.catch(() => {}); // refused: stay in CSS mode
   history.pushState({ fs: 1 }, ""); fsPushed = true; fsRefresh();
 }
 function exitFs() {
   if (!fs) return;
   closeCard(false);
-  fs = false; fsPanel.classList.remove("fs"); document.documentElement.classList.remove("fs-lock"); fsBtn.setAttribute("aria-pressed", "false");
+  fsInert(false); fs = false; fsPanel.classList.remove("fs"); document.documentElement.classList.remove("fs-lock"); fsBtn.setAttribute("aria-pressed", "false");
   setLegend(false);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (fsPushed) { fsPushed = false; if (history.state?.fs) { fsBack = true; history.back(); } } // popstate already consumed the entry when it started the exit
@@ -175,7 +177,7 @@ function exitFs() {
 }
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = () => setLegend(!legendOpen());
-addEventListener("keydown", e => { if (e.key === "Escape" && fs) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card
+addEventListener("keydown", e => { if (e.key === "Escape" && fs) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card (CSS mode; in API full screen the browser takes Escape and fullscreenchange exits)
 addEventListener("popstate", () => { if (fsBack) { fsBack = false; return; } fsPushed = false; exitFs(); }); // fsBack: the pop our own history.back() causes must not close a session entered since
 addEventListener("orientationchange", () => { if (map) fsRefresh(); });
 document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
@@ -290,7 +292,7 @@ function renderMap() {
   if (lay.on.newsnow && !nsErr) nsCfg ? nsShow() : nsBusy || nsLoad();
   if (lay.on.newsnow && nsCfg && !nsErr) lg.insertAdjacentHTML("beforeend", `<span class="sep">·</span><span class="ls ns"><span>New snow (${esc(nsRange().timeRange)} h):</span>` +
     nsCfg.thresholds.map(({ range: [lo, hi], color }) => `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi)}<span class="cm"> cm</span></span>`).join("") + `<span class="ph">cm</span></span>`);
-  // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge, labels follow the zoom tier (#39).
+  // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge at tiers 0–1 (none at tier 2, the highlighted one never), labels follow the zoom tier (#39).
   // Landmark labels move beside/above/below their symbol to clear dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
   const size = map.getSize(), at = (lat, lon) => map.latLngToContainerPoint([lat, lon]), tier = tierOf(map.getZoom(), fitZ);
   const narrow = size.x < 480, charW = narrow ? 7 : 8, tipH = narrow ? 20 : 24;
@@ -489,8 +491,8 @@ const statHtml = (t, name, small, bad) => `<div class="stat"><b>${bad ? `<s clas
 const modelOf = f => { const m = state.hourly?.model || {}; return m.fields?.[f] ?? m; };
 const modelSrcOf = f => { const m = modelOf(f); return `model · ${m.source || "source unknown"}${m.issued ? ", latest issue " + fmtSlot(m.issued) : ""}`; };
 const modelSrcs = (...fs) => [...new Set(fs.map(modelSrcOf))].join(" / "); // the fields' labels, one per distinct source
-// forecast zone label: shown only when the chart has model lines; the latest run's source, flagged when it is the fallback
-const zoneLabel = has => !has ? "" : state.hourly?.model?.source === "MET Norway" ? "forecast · fallback: MET Norway" : `forecast · ${state.hourly?.model?.source || "source unknown"}`;
+// forecast zone label: shown only when the chart has model lines; the drawn fields' own sources, flagged when one is the fallback
+const zoneLabel = (has, ...fs) => !has ? "" : "forecast · " + [...new Set(fs.map(f => modelOf(f).source || "source unknown"))].map(x => x === "MET Norway" ? "fallback: MET Norway" : x).join(" / ");
 // latest measured value of f as a stat card, with its measurement time and stale/suspect state
 function latestCard(s, f, name, u, hours, now, gauge) {
   const id = s.id, v = latest(hours, f, id, now), own = Date.parse(s.dates?.[f] || s.date);
@@ -540,13 +542,14 @@ function renderCond(s) {
   const rh = el("condRh").checked && ln("rh", "Humidity", "%", muted, { borderWidth: 1, yAxisID: "yH" });
   const bar = (label, unit, data, o) => barSet(label, unit, data, { yAxisID: "yP", ...o });
   const pr = bar(gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm", past(pf), { backgroundColor: rain, kind: "measured", src: `measured · ${srcOf(id)}` });
-  const pm = bar("Precip. · model", "mm", slice(hours, "pm", id, from, to).map(p => ({ ...p, sm: hours[p.k]?.sm?.[id] })), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, kind: "model", src: modelSrcOf("pm") });
+  const sameRun = modelSrcOf("sm") === modelSrcOf("pm"); // after a fallback sm is an older Open-Meteo run: never shown as this bar's snow
+  const pm = bar("Precip. · model", "mm", slice(hours, "pm", id, from, to).map(p => ({ ...p, sm: sameRun ? hours[p.k]?.sm?.[id] : undefined })), { backgroundColor: "transparent", borderColor: rainM, borderWidth: 1.5, kind: "model", src: modelSrcOf("pm") });
   const hasModel = nn(mt.data) || nn(pm.data);
   const sets = [lt, oft, rh, mt, pr, pm].filter(d => d && (d === lt || nn(d.data)));
   const zero = { color: c => c.tick.value === 0 ? css("--fg") : css("--line"), lineWidth: c => c.tick.value === 0 ? 1.5 : 1 };
   el("cond").setAttribute("aria-label", `Conditions chart, ${condH} hours either side of now`);
   charts.cond = new Chart(el("cond"), {
-    type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(hasModel))],
+    type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(hasModel, "mt", "pm"))],
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearestX", intersect: false },
       plugins: { legend,
         tooltip: tip({ label: c => `${c.dataset.label}: ${c.parsed.y} ${c.dataset.unit}${c.raw.sm != null ? ` (snow ${c.raw.sm} cm)` : ""}${c.raw.fl ? ` · suspect: ${c.raw.fl}` : ""}` }) },
@@ -596,7 +599,7 @@ function renderSnow(s) {
   const sets = [hsL, sd, rise, sm].filter(d => nn(d.data));
   el("snow").setAttribute("aria-label", `Snow depth chart, ${h} hours either side of now`);
   charts.snow = new Chart(el("snow"), {
-    type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(nn(sd.data) || nn(sm.data)))],
+    type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(nn(sd.data) || nn(sm.data), "sd", "sm"))],
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearestX", intersect: false },
       plugins: { legend, tooltip: tip() },
       scales: { x: timeAxis(from, to, h), y: { beginAtZero: true, grace: "5%", title: { display: true, text: "cm" } },
@@ -645,7 +648,7 @@ function renderWind(s) {
   const dirAt = x => { const k = viennaKey(x), d = x <= now ? hours[k]?.wr?.[id] : hours[k]?.md?.[id]; return d == null ? "" : `Wind from ${Math.round(d)}°`; };
   el("wind").setAttribute("aria-label", `Wind chart, ${h} hours either side of now`);
   charts.wind = new Chart(el("wind"), {
-    type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(nn(mw.data) || nn(mg.data)))],
+    type: "line", data: { datasets: sets }, plugins: [forecastZone(now, zoneLabel(nn(mw.data) || nn(mg.data), "mw", "mg"))],
     options: { maintainAspectRatio: false, animation: false, interaction: { mode: "nearestX", intersect: false },
       plugins: { legend: { labels: { ...legend.labels, filter: i => i.text !== "Direction" } }, tooltip: tip({ afterBody: it => dirAt(it[0].parsed.x) }) },
       scales: { x: timeAxis(from, to, h), y: { beginAtZero: true, grace: "8%", title: { display: true, text: "km/h" }, ticks: { callback: v => v < 0 ? "" : v } } } },
@@ -681,6 +684,7 @@ const WHY = { "out of range": "outside the possible range for this sensor", jump
 function renderChecks() {
   const h = state.health, now = Date.now(), items = [], off = new Map((h?.offline || []).map(o => [o.id, o]));
   for (const [k, v] of Object.entries(h?.sources || {})) if (!v.ok) items.push(`<b>Source ${esc(k)} failed</b> in the last run: ${esc(v.error || "unknown error")}${v.detail ? ` (${esc(v.detail)})` : ""}. Its stations keep their last values, which age as shown.`);
+    else if (v.warning) items.push(`<b>Source ${esc(k)} degraded</b> in the last run: ${esc(v.warning)}.`);
   if (!h) items.push("Source status unavailable (no data checks file from the last run).");
   for (const s of state.stations) if (!(now - Date.parse(s.date) <= offlineAfter)) off.set(s.id, { name: s.name, last: s.date });
   for (const o of off.values()) items.push(`<b>${esc(o.name)}</b> offline: no measurement for over 24 h (last ${esc(fmtSlot(o.last))}).`);
@@ -742,9 +746,9 @@ async function load() {
   try {
     let res;
     try { res = await Promise.all([get("stations"), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null), get("health").catch(() => null)]); }
-    catch { if (!lastLoad) note.textContent = "Couldn't load station data. Reload the page to try again."; return; } // refresh failures keep old data
+    catch { note.textContent = lastLoad ? `Refresh failed · showing data from ${fmtSlot(state.updated)}` : "Couldn't load station data. Reload the page to try again."; return; } // refresh failures keep old data
     const [st, dg, rg, hr, he] = res;
-    state.danger = dg; state.regions = rg;
+    state.danger = dg ?? state.danger; state.regions = rg ?? state.regions; // like hourly: a failed refresh keeps the polygons
     state.stations = st.stations || [];
     state.hourly = hr ?? state.hourly; state.health = he; state.updated = st.updated; // a failed hourly fetch keeps the charts' data
     if (!placed().some(s => s.id === state.selected)) state.selected = placed().map(s => goodOnly(s, Date.now())).sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id; // a misplaced or saved-but-gone station is never picked; default: deepest good HS
@@ -752,7 +756,7 @@ async function load() {
     lastLoad = Date.now();
     if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); } // restyle polygons for the new bulletin
     renderAll();
-  } catch (e) { console.error(e); // a render bug is not a load failure
+  } catch (e) { console.error(e); note.textContent = "Something went wrong showing the data. Reload the page to try again."; // a render bug is not a load failure
   } finally { loading = false; }
 }
 load();
