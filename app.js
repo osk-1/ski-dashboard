@@ -156,6 +156,7 @@ function enterFs() {
 }
 function exitFs() {
   if (!fs) return;
+  closeCard(false);
   fs = false; fsPanel.classList.remove("fs"); document.documentElement.classList.remove("fs-lock"); fsBtn.setAttribute("aria-pressed", "false");
   document.getElementById("legend").classList.remove("open"); document.getElementById("fsLegend").setAttribute("aria-expanded", "false");
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -164,10 +165,36 @@ function exitFs() {
 }
 document.getElementById("fsExit").onclick = exitFs;
 document.getElementById("fsLegend").onclick = e => e.currentTarget.setAttribute("aria-expanded", document.getElementById("legend").classList.toggle("open"));
-addEventListener("keydown", e => { if (e.key === "Escape" && fs) exitFs(); });
+addEventListener("keydown", e => { if (e.key === "Escape" && fs) card.classList.contains("open") ? closeCard() : exitFs(); }); // first Escape closes the station card
 addEventListener("popstate", () => { if (fsBack) { fsBack = false; return; } fsPushed = false; exitFs(); }); // fsBack: the pop our own history.back() causes must not close a session entered since
 addEventListener("orientationchange", () => { if (map) fsRefresh(); });
 document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
+// Station card (full screen only): a tap on a station opens it instead of selecting; Open charts leaves full screen and selects.
+const card = document.getElementById("stationCard"), scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
+let cardId;
+function openCard(id) {
+  const s = state.stations.find(x => x.id === id); if (!s) return;
+  cardId = state.selected = id; // renderMap highlights it; the charts wait for Open charts
+  const g = goodOnly(s, Date.now());
+  document.getElementById("scTitle").textContent = s.name; document.getElementById("scAlt").textContent = `${s.alt} m`;
+  document.getElementById("scRows").innerHTML = scRows.map(([f, fmt]) => {
+    const bad = g.bad[f], label = FN[f][0].toUpperCase() + FN[f].slice(1);
+    if (g[f] == null && !bad && !(f === "hs" && s.type === "snow")) return ""; // hide what this station type does not measure
+    return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + "</div>";
+  }).join("");
+  renderMap(); card.classList.add("open"); card.focus();
+}
+function closeCard(refocus = true) {
+  if (!card.classList.contains("open")) return;
+  card.classList.remove("open");
+  if (refocus) (document.querySelector(`#map [data-sid="${CSS.escape(cardId)}"]`) || fsBtn).focus();
+}
+document.getElementById("scClose").onclick = () => closeCard();
+document.getElementById("scOpen").onclick = () => {
+  const id = cardId; exitFs(); select(id);
+  // instant ("auto"): a smooth scroll got cancelled by the layout shifting back from full screen; instant also honours prefers-reduced-motion
+  requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("condTitle").scrollIntoView({ block: "start", behavior: "auto" })));
+};
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
@@ -232,7 +259,7 @@ function initMap() {
     return { color: c, weight: 1, opacity: old ? .35 : .8, fillColor: c, fillOpacity: old ? .12 : .4 }; } });
   new Layers({ position: "topright" }).addTo(map);
   const names = () => { for (let i = 0; i < 3; i++) mapDiv.classList.toggle("t" + i, tierOf(map.getZoom(), fitZ) === i); }; // t0 / t1 / t2
-  map.on("zoomend", () => { names(); renderMap(); }); names(); map.on("click", nsClick);
+  map.on("zoomend", () => { names(); renderMap(); }); names(); map.on("click", nsClick); map.on("click", () => closeCard());
 }
 
 function renderMap() {
@@ -299,7 +326,8 @@ function renderMap() {
   for (const lm of landmarks) if (!lm.pk) { // second pass: every village re-picks its side now that the others' labels are known
     taken.splice(taken.indexOf(lm.box), 1); lm.box = place(lm); taken.push(lm.box);
   }
-  const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : select(n.lead.id); }; // overlapping pads: nearest group or station wins
+  const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : pick(n.lead.id); }; // overlapping pads: nearest group or station wins
+  const pick = id => fs ? openCard(id) : select(id);
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
   for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {
@@ -331,7 +359,7 @@ function renderMap() {
     if (tip) m.bindTooltip(`<span class="nm">${esc(s.name)}</span><b${bad ? ' class="nd"' : ""}>${esc(val)}</b>`, { permanent: true, direction: spot.dir, offset: spot.off, interactive: true, className: "val" + (sel ? " sel" : "") + (nm ? " wn" : "") });
     if (mg && g.count > 1) L.marker(g.ll, { interactive: false, keyboard: false, icon: L.divIcon({ className: "gb-ic", iconSize: [16, 16], iconAnchor: [-1, 17], html: `<span class="gb" aria-hidden="true">${g.count}</span>` }) }).addTo(lg2);
     if (g.arr && mg) L.marker(g.ll, { interactive: false, keyboard: false, icon: L.divIcon({ className: "wind-ic", iconSize: [20, 20], iconAnchor: [10, 32], html: `<svg width="20" height="20" viewBox="-10 -10 20 20">${arrow(0, 0, (g.arr.wr + 180) % 360, css("--wind"))}</svg>` }) }).addTo(groups.wind);
-    const act = mg ? () => zoomTo(g) : () => select(s.id);
+    const act = mg ? () => zoomTo(g) : () => pick(s.id);
     m.on("click", act); // interactive tooltip clicks bubble here too
     const el = m.getElement(), t = document.createElementNS("http://www.w3.org/2000/svg", "title");
     t.textContent = mg ? label : `${s.name} · ${s.alt} m · ${wo ? "wind station" : wx ? "weather station" : val}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;

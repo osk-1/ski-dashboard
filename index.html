@@ -123,6 +123,18 @@ html.fs-lock, html.fs-lock body { overflow: hidden; }
 .panel.fs .legend.open { display: flex; position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px); margin: 0; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .panel.fs .legend > button { display: none; }
 .panel.fs .legend.open .wx { display: block; flex-basis: 100%; }
+#stationCard { display: none; }
+.panel.fs #stationCard { display: block; position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box; max-height: 45dvh; overflow: auto; padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: var(--panel); border-top: 1px solid var(--line); border-radius: 12px 12px 0 0; visibility: hidden; transform: translateY(100%); transition: transform .2s, visibility 0s .2s; }
+.panel.fs #stationCard.open { visibility: visible; transform: none; transition: transform .2s; }
+@media (prefers-reduced-motion: reduce) { .panel.fs #stationCard, .panel.fs #stationCard.open { transition: none; } }
+#stationCard:focus { outline: none; }
+#stationCard .sc-h { display: flex; gap: 8px; align-items: flex-start; } #stationCard .sc-h > div { flex: 1; min-width: 0; } /* both buttons stay in view when the rows scroll */
+#stationCard h3 { margin: 0; font-size: 1.1rem; } #stationCard p { margin: 2px 0 8px; color: var(--muted); font-size: .85rem; }
+#stationCard .scr { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; padding: 5px 0; border-top: 1px solid var(--line); align-items: baseline; }
+#stationCard .scr b.nd { grid-column: 2 / 4; color: var(--muted); font-weight: 600; text-align: right; } #stationCard .scr i { color: var(--muted); font-style: normal; font-size: .85rem; min-width: 3.5em; text-align: right; }
+#stationCard button { min-width: 44px; min-height: 44px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font: 600 .95rem/1 var(--body); cursor: pointer; }
+#stationCard #scOpen { padding: 0 12px; color: var(--bg); background: var(--accent); border-color: var(--accent); }
+#stationCard button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #fsExit:focus-visible, #fsLegend:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .legend i.b { box-shadow: inset 0 0 0 1px var(--line); } /* the <1 cm band is transparent on the map: empty box */
@@ -198,6 +210,10 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
       <button type="button" id="fsExit" aria-label="Exit full screen">✕ Exit</button>
       <button type="button" id="fsLegend" aria-expanded="false" aria-controls="legend">Legend</button>
       <div class="legend" id="legend"></div>
+      <section id="stationCard" aria-labelledby="scTitle" tabindex="-1">
+        <div class="sc-h"><div><h3 id="scTitle">Station</h3><p id="scAlt"></p></div><button type="button" id="scOpen">Open charts</button><button type="button" id="scClose" aria-label="Close station card">✕</button></div>
+        <div id="scRows"></div>
+      </section>
     </section>
     <section class="panel">
       <details id="tableDetails">
