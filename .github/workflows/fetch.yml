@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 20
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -95,10 +95,14 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
-      # deploy-pages looks the artifact up ~1s after the upload and intermittently finds none ("Found 0 artifact(s)")
-      - name: Let the artifact become visible
-        if: steps.gate.outputs.run == 'true'
-        run: sleep 20
+      # deploy-pages intermittently finds no artifact ("Found 0 artifact(s)") right after the upload: retry once, only on failure
       - id: deployment
         if: steps.gate.outputs.run == 'true'
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - name: Wait before retrying deploy
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5
