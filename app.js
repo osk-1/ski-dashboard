@@ -49,11 +49,15 @@ function renderSummary() {
     + (g ? stat(`${Math.round(g.y)} km/h`, `Strongest gust, last ${sumH} h · ${esc(gs?.name ?? g.id)} · ${g.wr == null ? "direction unknown" : `<span style="display:inline-block;transform:rotate(${(g.wr + 180) % 360}deg)" aria-hidden="true">↑</span> from ${compass(g.wr)}`} · ${fmtSlot(keyMs(g.k))}`)
       : `<div class="stat"><b title="No data in this window">–</b><span>Strongest gust, last ${sumH} h</span></div>`)
     + (cards || '<p class="src xl">No station data in this window.</p>') + note;
-  // sheet peek: danger, deepest, new snow last / next 24 h of the highest band with snow data (else with stations) (fixed 24 h, independent of the summary window)
-  const b24 = bandStats(all, hours, now, 24), bands = [...BANDS].reverse().filter(([k]) => b24[k].n > 0), top = bands.find(([k]) => b24[k].snowLast != null || b24[k].snowNext != null) || bands[0], d = dangerNow(), cm = v => v == null ? "–" : `+${Math.round(v)} cm`;
-  document.getElementById("glance").innerHTML = (d ? stat(d.old ? "–" : dchip(d.mx), d.old ? "No current bulletin" : "Danger") : "")
-    + stat(deep ? `${Math.round(deep.hs)} cm` : "–", deep ? `Deepest · ${esc(deep.name)}` : "Deepest")
-    + (top ? stat(cm(b24[top[0]].snowLast), `New 24 h · ${top[2]}`) + stat(cm(b24[top[0]].snowNext), "Next 24 h · model") : "");
+  // sheet peek: today's danger in the three Tirol regions around St. Anton (only while current), Galzig now and its next 24 h (model), Ulmerhütte HS change over 24 h
+  const D = 24 * 3600e3, gz = all.find(x => x.id === "TAWES-11110"), ul = all.find(x => x.id === "SAUL2"), gg = gz && goodOnly(gz, Date.now()), ug = ul && goodOnly(ul, Date.now());
+  const regs = ["AT-07-07", "AT-07-10", "AT-07-11"].map(k => state.danger?.regions?.[k]).filter(r => r && new Date(r.valid_end) >= new Date());
+  const snowNext = gz && sumField(hours, "sm", gz.id, now + 1, now + D), tLo = gz && extremeOf(hours, "mt", gz.id, now + 1, now + D, false), tHi = gz && extremeOf(hours, "mt", gz.id, now + 1, now + D, true);
+  const dh = ug && ug.hs != null ? delta(hours, "hs", ul.id, now, 24) : null, sign = v => (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(Math.round(v));
+  document.getElementById("glance").innerHTML = regs.map(r => stat(dchip(Math.max(0, ...r.ratings.map(x => x.level))), esc(r.name.replace(" Mountains", "")))).join("")
+    + stat(gg?.lt != null ? `${gg.lt} °C` : "–", gg?.lt != null ? `Galzig now · ${fmtHour(Date.parse(gz.dates?.lt || gz.date))}` : "Galzig now · no current value")
+    + stat(snowNext?.n ? `+${Math.round(snowNext.v)} cm` : "–", `Galzig next 24 h${tLo ? ` · ${Math.round(tLo.y)} / ${Math.round(tHi.y)} °C` : ""}`)
+    + stat(dh ? `${sign(dh.d)} cm` : "–", "Ulmerhütte snow 24 h");
   if (sheetOn()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } // the peek fits the header
 }
 document.getElementById("sumWin").addEventListener("click", e => {
