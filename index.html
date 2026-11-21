@@ -249,6 +249,15 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
     <div class="strip now" id="snowNow" hidden></div>
     <p class="src" id="snowNote"></p>
   </section>
+  <section class="panel" id="windPanel">
+    <h2 id="windTitle">Wind</h2>
+    <div class="ctl">
+      <div class="seg" id="windWin" data-chart="wind" role="group" aria-label="Time window"><button type="button" data-h="1">1h</button><button type="button" data-h="6">6h</button><button type="button" data-h="12">12h</button><button type="button" data-h="24">24h</button><button type="button" data-h="48">48h</button><button type="button" data-h="72">72h</button><button type="button" data-h="168">7d</button></div>
+    </div>
+    <div class="chartbox" id="windBox"><canvas id="wind" role="img" aria-label="Wind chart"></canvas></div>
+    <div class="strip now" id="windNow" hidden></div>
+    <p class="src" id="windNote"></p>
+  </section>
   </div>
 
   <details class="panel" id="checks">
