@@ -145,6 +145,29 @@ function nsShow() {
     nsOv = L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: .55, interactive: false, attribution: NS_ATTR }).addTo(map); nsOv.url = url; },
     () => { delete nsImg[url]; if (nsCur() === url) { nsErr = true; nsPanel(); renderMap(); } });
 }
+// Full screen: the Fullscreen API where it works, otherwise (iPhone Safari) the same panel pinned by CSS. Every exit path ends in exitFs().
+let fs = false, fsPushed = false, fsY = 0, fsBtn;
+const fsPanel = document.getElementById("mapPanel"), fsRefresh = () => { map.invalidateSize(); if (fs) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+function enterFs() {
+  if (fs) return;
+  fs = true; fsY = scrollY; fsPanel.classList.add("fs"); document.documentElement.classList.add("fs-lock"); fsBtn.setAttribute("aria-pressed", "true");
+  fsPanel.requestFullscreen?.()?.catch(() => {}); // refused: stay in CSS mode
+  history.pushState({ fs: 1 }, ""); fsPushed = true; fsRefresh();
+}
+function exitFs() {
+  if (!fs) return;
+  fs = false; fsPanel.classList.remove("fs"); document.documentElement.classList.remove("fs-lock"); fsBtn.setAttribute("aria-pressed", "false");
+  document.getElementById("legend").classList.remove("open"); document.getElementById("fsLegend").setAttribute("aria-expanded", "false");
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (fsPushed) { fsPushed = false; if (history.state?.fs) history.back(); } // popstate already consumed the entry when it started the exit
+  scrollTo(0, fsY); fsRefresh(); fsBtn.focus();
+}
+document.getElementById("fsExit").onclick = exitFs;
+document.getElementById("fsLegend").onclick = e => e.currentTarget.setAttribute("aria-expanded", document.getElementById("legend").classList.toggle("open"));
+addEventListener("keydown", e => { if (e.key === "Escape" && fs) exitFs(); });
+addEventListener("popstate", () => { fsPushed = false; exitFs(); });
+addEventListener("orientationchange", () => { if (map) fsRefresh(); });
+document.addEventListener("fullscreenchange", () => { if (fs && !document.fullscreenElement) exitFs(); else if (map) fsRefresh(); });
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
@@ -160,9 +183,15 @@ function initMap() {
   const Reset = L.Control.extend({ onAdd() {
     const d = L.DomUtil.create("div", "leaflet-bar"), b = L.DomUtil.create("button", "", d);
     b.type = "button"; b.title = "Reset view"; b.setAttribute("aria-label", "Reset view");
-    b.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9"/></svg>';
+    b.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3"/></svg>';
     b.onclick = reset; L.DomEvent.disableClickPropagation(d); return d; } });
   new Reset({ position: "topleft" }).addTo(map);
+  const Full = L.Control.extend({ onAdd() {
+    const d = L.DomUtil.create("div", "leaflet-bar"), b = fsBtn = L.DomUtil.create("button", "", d);
+    b.type = "button"; b.title = "Full screen"; b.setAttribute("aria-label", "Full screen"); b.setAttribute("aria-pressed", "false");
+    b.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9"/></svg>';
+    b.onclick = () => fs ? exitFs() : enterFs(); L.DomEvent.disableClickPropagation(d); return d; } });
+  new Full({ position: "topleft" }).addTo(map);
   const Layers = L.Control.extend({ onAdd() {
     const d = lc = L.DomUtil.create("div", "lay"), bar = L.DomUtil.create("div", "leaflet-bar", d), b = L.DomUtil.create("button", "", bar), p = lp = L.DomUtil.create("div", "lp", d);
     b.type = "button"; b.title = "Map layers"; b.setAttribute("aria-label", "Map layers"); b.setAttribute("aria-controls", "lp");
@@ -231,7 +260,7 @@ function renderMap() {
   mapDiv.classList.toggle("narrow", narrow);
   const area = r => (r[2] - r[0]) * (r[3] - r[1]);
   const overlap = (r, q) => Math.max(0, Math.min(r[2], q[2]) - Math.max(r[0], q[0])) * Math.max(0, Math.min(r[3], q[3]) - Math.max(r[1], q[1]));
-  const ctl = [[0, 0, 50, 112]], mb = mapDiv.getBoundingClientRect(), cb = lc.getBoundingClientRect(); // zoom + reset column and the layer button/panel, weighted 10x: nothing should sit under them
+  const mb = mapDiv.getBoundingClientRect(), tl = mapDiv.querySelector(".leaflet-top.leaflet-left").getBoundingClientRect(), ctl = [[0, 0, tl.right - mb.left, tl.bottom - mb.top]], cb = lc.getBoundingClientRect(); // zoom/reset/full-screen column and the layer button/panel, weighted 10x: nothing should sit under them
   ctl.push([cb.left - mb.left, cb.top - mb.top, cb.right - mb.left, cb.bottom - mb.top]);
   const costAgainst = (boxes, r) => boxes.reduce((c, q) => c + overlap(r, q), 0) + 10 * ctl.reduce((c, q) => c + overlap(r, q), 0) + 4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
   const S = shown(), byId = Object.fromEntries(S.map(s => [s.id, s]));

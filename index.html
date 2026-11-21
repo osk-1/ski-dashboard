@@ -84,6 +84,7 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .lp :focus-visible, #map .lay > .leaflet-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 820px), (max-height: 500px) and (orientation: landscape) {
   #map .lay > .leaflet-bar button { width: 44px; height: 44px; line-height: 42px; }
+  .panel.fs #map .leaflet-left .leaflet-bar :is(a, button) { width: 44px; height: 44px; line-height: 42px; } /* only in full screen: 44 px in the page shifts the label layout of the small map */
   #map .lp label, #map .lp .gh button { min-height: 44px; } #map .lp input { width: 22px; height: 22px; }
   #map .lp select { height: 44px; } .legend .ls.ns { flex-basis: 100%; } .legend .ls.ns i { flex: none; } /* own scrolling row; 9 swatches would otherwise shrink to nothing */
 }
@@ -108,6 +109,21 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
   .legend.open .wx { display: block; flex-basis: 100%; }
   .legend button { display: inline-block; flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--muted); font: 600 .8rem/1 var(--body); cursor: pointer; }
 }
+#fsExit, #fsLegend { display: none; }
+html.fs-lock, html.fs-lock body { overflow: hidden; }
+.panel.fs { position: fixed; inset: 0; z-index: 10000; height: 100dvh; border-radius: 0; border: 0; box-sizing: border-box; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: flex; flex-direction: column; }
+.panel.fs h2 { display: none; }
+.panel.fs #map { flex: 1; height: auto; min-height: 0; border-radius: 0; }
+.panel.fs #map .leaflet-top.leaflet-right { margin-top: 56px; } /* the Exit button owns the top-right corner; the layers control sits below it */
+.panel.fs #map .lp { max-height: calc(100dvh - 120px) !important; }
+.panel.fs #fsExit, .panel.fs #fsLegend { display: block; position: absolute; z-index: 1; min-width: 44px; height: 44px; padding: 0 14px; box-sizing: border-box; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font: 600 .95rem/1 var(--body); cursor: pointer; }
+.panel.fs #fsExit { top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); }
+.panel.fs #fsLegend { left: max(8px, env(safe-area-inset-left)); bottom: max(8px, env(safe-area-inset-bottom)); }
+.panel.fs .legend { display: none; }
+.panel.fs .legend.open { display: flex; position: absolute; z-index: 1; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: calc(max(8px, env(safe-area-inset-bottom)) + 52px); margin: 0; padding: 8px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.panel.fs .legend > button { display: none; }
+.panel.fs .legend.open .wx { display: block; flex-basis: 100%; }
+#fsExit:focus-visible, #fsLegend:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .legend i { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
 .legend i.b { box-shadow: inset 0 0 0 1px var(--line); } /* the <1 cm band is transparent on the map: empty box */
 .tablebox { overflow-x: auto; }
@@ -176,9 +192,11 @@ s.bad { color: var(--muted); font-weight: 400; text-decoration-thickness: 1.5px;
   <section class="panel" id="danger" aria-label="Avalanche danger" hidden></section>
 
   <div class="grid2">
-    <section class="panel">
+    <section class="panel" id="mapPanel">
       <h2>Stations</h2>
       <div id="map"><div class="empty">Loading map…</div></div>
+      <button type="button" id="fsExit" aria-label="Exit full screen">✕ Exit</button>
+      <button type="button" id="fsLegend" aria-expanded="false" aria-controls="legend">Legend</button>
       <div class="legend" id="legend"></div>
     </section>
     <section class="panel">
