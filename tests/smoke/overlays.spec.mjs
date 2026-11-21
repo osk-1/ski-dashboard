@@ -1,4 +1,4 @@
-/* global map, L, document, window, Image -- page globals inside page.evaluate */
+/* global map, L, document, window, Image, nsImg -- page globals inside page.evaluate */
 import { deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import { DESKTOP, open, VIEWPORTS } from "./helpers.mjs";
@@ -110,7 +110,7 @@ test("switching away while an image loads does not poison its cache", async ({ b
   await radio(page, "Wind").check(); // ...while the selection moves to a Lambert overlay
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   release();
-  await page.waitForTimeout(300); // the held gust image finishes drawing, unseen
+  await page.evaluate(() => Promise.allSettled(Object.values(nsImg))); // the held gust image finishes drawing, unseen
   await radio(page, "Gust").check();
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   const [clear, kept] = await gustPixels(page);
