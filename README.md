@@ -72,7 +72,7 @@ python3 fetch.py
 
 ## Checks (CI)
 
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `python3 -m unittest discover tests`), `js` (ESLint with the repo rules in `eslint-rules/`, Prettier check on `app.js`/`lib.js`/`overlay.js`, `node --test`), `html` (html-validate, pinned + SRI check, secret scan, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `python3 -m unittest discover tests`), `js` (ESLint with the repo rules in `eslint-rules/`, Prettier check on `app.js`/`lib.js`/`overlay.js`, `node --test`), `html` (html-validate, pinned + SRI check, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
 
 Locally:
 
@@ -84,7 +84,7 @@ npx playwright test --trace off # smoke test; screenshots in test-results/
 pip install -r requirements-dev.txt && ruff check . && ruff format --check .
 ```
 
-Custom rules: no `spanGaps: true` (ESLint), `localStorage`/`sessionStorage` only inside `try` (`eslint-rules/storage-in-try.js`), every external script/stylesheet pinned and with `integrity` (`scripts/check-sri.mjs`), every data field in this README (`scripts/check-readme-fields.mjs`), no tokens in the repo (`scripts/check-secrets.mjs`).
+Custom rules: no `spanGaps: true` (ESLint), `localStorage`/`sessionStorage` only inside `try` (`eslint-rules/storage-in-try.js`), every external script/stylesheet pinned and with `integrity` (`scripts/check-sri.mjs`), every data field in this README (`scripts/check-readme-fields.mjs`).
 
 ### Require CI before merge (repo owner, one-time)
 

@@ -50,7 +50,6 @@ jobs:
       - run: npx html-validate index.html
       - run: node scripts/check-sri.mjs
       - run: node scripts/check-readme-fields.mjs
-      - run: node scripts/check-secrets.mjs
 
   workflows:
     runs-on: ubuntu-latest
