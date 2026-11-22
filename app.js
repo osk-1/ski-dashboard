@@ -11,11 +11,11 @@ const arrow = (x, y, to, c) => `<path d="M0-10L6 2H2.5V10H-2.5V2H-6Z" fill="${c}
 
 let state = { stations: [], danger: null, regions: null, hourly: null, health: null, updated: null, selected: null };
 const win = { cond: 24, snow: 72, wind: 24 }; // chart windows in hours, one switch per chart
-const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), phone = () => sheetMq.matches, sheetOn = phone; // phones: the bottom sheet is the only layout
+const sheetMq = matchMedia("(max-width: 820px), (max-height: 500px) and (orientation: landscape)"), phone = () => sheetMq.matches; // phones: the bottom sheet is the only layout
 const winKey = k => k + "H"; // localStorage keys condH, snowH, windH
 let charts = {};
 try { state.selected = localStorage.getItem("sel"); } catch {}
-let cardId; const hl = () => cardId ?? (sheetOn() ? null : state.selected); // map highlight: the card preview, else the selection (the sheet: none, the map is the overview)
+let cardId; const hl = () => cardId ?? (phone() ? null : state.selected); // map highlight: the card preview, else the selection (the sheet: none, the map is the overview)
 for (const k in win) try { win[k] = winOr(+localStorage.getItem(winKey(k)), win[k]); } catch {}
 
 let chgH = 24, sortBy = { k: "alt", dir: -1 }; // table: change window (hours back) and sort, sort is not persisted
@@ -61,7 +61,7 @@ function renderSummary() {
     + stat(dh ? `${sign(dh.d)} cm` : "–", "Ulmerhütte snow 24 h");
   fitPeek();
 }
-function fitPeek() { if (sheetOn()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } } // the peek fits the header (overview or station card)
+function fitPeek() { if (phone()) { const w = document.querySelector(".wrap"); document.documentElement.style.setProperty("--peek", Math.ceil(document.querySelector("header").getBoundingClientRect().bottom - w.getBoundingClientRect().top + 14) + "px"); } } // the peek fits the header (overview or station card)
 document.getElementById("sumWin").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   sumH = winOr(+b.dataset.h, sumH);
@@ -225,11 +225,11 @@ function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); 
 // Bottom sheet (phones, sheetMq): the map fills the screen and the page scrolls over it as a sheet.
 // On a phone the panel moves to the top of <body> so the sheet (.wrap) can stack above it; the card follows (above the sheet).
 const mapPanel = document.getElementById("mapPanel"), card = document.getElementById("stationCard"), panelHome = mapPanel.parentElement;
-const refreshMap = () => { map.invalidateSize(); if (sheetOn()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
+const refreshMap = () => { map.invalidateSize(); if (phone()) map.dragging.enable(); else if (L.Browser.mobile) map.dragging.disable(); }; // resize then re-fits and re-lays out
 const sheetWin = () => { const h = [24, 72, 168].includes(win.cond) ? win.cond : 24; for (const k in win) win[k] = h; for (const d of document.querySelectorAll(".note")) d.open = false; }; // one shared window; notes behind "About this chart"
 const placeSheet = () => {
-  document.documentElement.classList.toggle("sheet", sheetOn());
-  if (sheetOn()) { document.body.prepend(mapPanel); document.querySelector("header").append(card); sheetWin(); } else { closeCard(false); panelHome.prepend(mapPanel); mapPanel.append(card); }
+  document.documentElement.classList.toggle("sheet", phone());
+  if (phone()) { document.body.prepend(mapPanel); document.querySelector("header").append(card); sheetWin(); } else { closeCard(false); panelHome.prepend(mapPanel); mapPanel.append(card); }
 };
 placeSheet();
 sheetMq.addEventListener("change", () => { placeSheet(); if (map) { refreshMap(); renderCharts(); } });
@@ -246,8 +246,8 @@ document.getElementById("chartTabs").addEventListener("click", e => {
   tab = b.dataset.tab; try { localStorage.setItem("tab", tab); } catch {}
   showTab(); const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[tab](s); // drawn while hidden: re-lay out at its real width
 });
-const sheetPeek = () => sheetOn() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
-addEventListener("keydown", e => { if (e.key === "Escape" && sheetOn() && card.classList.contains("open")) closeCard(); });
+const sheetPeek = () => phone() ? Math.max(0, innerHeight - document.querySelector(".wrap").getBoundingClientRect().top - scrollY) : 0; // sheet height over the map at its lowest (scrolled to the top)
+addEventListener("keydown", e => { if (e.key === "Escape" && phone() && card.classList.contains("open")) closeCard(); });
 addEventListener("orientationchange", () => { if (map) refreshMap(); });
 // Station card (phones): a tap on a station swaps the overview in the sheet for its card and selects it; swipe up for the charts, X returns to the overview.
 const scRows = [["hs", v => Math.round(v) + " cm"], ["n24", v => v + " cm"], ["lt", v => v + " °C"], ["wg", v => Math.round(v) + " km/h"], ["wg_boe", v => Math.round(v) + " km/h"], ["wr", v => `<svg width="14" height="14" viewBox="-7 -10 14 20" aria-hidden="true">${arrow(0, 0, (v + 180) % 360, "currentColor")}</svg> ${Math.round(v)}°`]];
@@ -267,7 +267,7 @@ function openCard(id) {
     return `<div class="scr"><span>${esc(label)}</span>` + (bad ? `<b class="nd">${esc(badText(bad))}</b><i></i>` : g[f] == null ? "<b>—</b><i></i>" : `<b>${fmt(g[f])}</b><i>${esc(fmtLast(Date.parse(s.dates?.[f] || s.date)))}</i>`) + mm(f, fmt) + "</div>";
   }).join("");
   card.classList.add("open");
-  if (!sheetOn()) renderMap(); // the sheet renders the map in select()
+  if (!phone()) renderMap(); // the sheet renders the map in select()
   else { if (s.type === "wind") tab = "wind"; /* memory only, not saved */ select(id); scrollTo(0, 0); fitPeek(); // the charts below follow the station; the lowered sheet shows the card
     map.panInside([s.lat, s.lon], { paddingBottomRight: [0, sheetPeek() + 24], animate: false }); }
   card.focus({ preventScroll: true });
@@ -281,7 +281,7 @@ document.getElementById("scClose").onclick = () => closeCard();
 function initMap() {
   mapDiv.innerHTML = "";
   const B = BOUNDS, pad = [.03, .015];
-  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile || sheetOn() }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
+  map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile || phone() }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
   const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
   fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
@@ -414,7 +414,7 @@ function renderMap() {
     taken.splice(taken.indexOf(lm.box), 1); lm.box = place(lm); taken.push(lm.box);
   }
   const tap = ll => { const n = grp.reduce((a, t) => map.distance(ll, t.ll) < map.distance(ll, a.ll) ? t : a); n.merged ? zoomTo(n) : pick(n.lead.id); }; // overlapping pads: nearest group or station wins
-  const pick = id => sheetOn() ? openCard(id) : select(id);
+  const pick = id => phone() ? openCard(id) : select(id);
   const zoomTo = g => map.setView(g.ll, Math.min(map.getZoom() + 1, map.getMaxZoom()));
   let focusEl;
   for (const g of grp.sort((a, b) => b.ll[0] - a.ll[0])) {
@@ -517,7 +517,7 @@ function chartDefaults() {
   Chart.defaults.color = css("--muted");
   Chart.defaults.borderColor = css("--line");
   Chart.defaults.font.family = css("--body");
-  const sh = sheetOn(); // set both ways: a resize across the sheet breakpoint must restore the stock tooltip
+  const sh = phone(); // set both ways: a resize across the sheet breakpoint must restore the stock tooltip
   if (sh) Chart.register(cursor);
   Chart.defaults.events = sh ? ["mousemove", "click", "touchstart", "touchmove"] : ["mousemove", "mouseout", "click", "touchstart", "touchmove"]; // sheet: no mouseout / touchend, the cursor stays
   Object.assign(Chart.defaults.plugins.tooltip, { enabled: !sh, external: sh ? readout : null });
@@ -541,13 +541,13 @@ const readout = ({ chart: c, tooltip: t }) => {
 };
 const cursor = { id: "cursor",
   afterRender(c) { // first draw at a real size: put the cursor on the latest measured hour (else now)
-    if (!sheetOn() || c.$cur || !c.width) return; c.$cur = 1;
+    if (!phone() || c.$cur || !c.width) return; c.$cur = 1;
     const now = anchorMs(state.hourly?.hours || {}, Date.now()), last = Math.max(...c.data.datasets.filter(d => d.kind === "measured" && !d.noTip).flatMap(d => d.data.filter(p => p.y != null && p.x <= now).map(p => p.x)));
     const px = Math.max(c.chartArea.left, Math.min(c.chartArea.right, c.scales.x.getPixelForValue(isFinite(last) ? last : now))), items = Chart.Interaction.modes.nearestX(c, { x: px });
     if (items.length) requestAnimationFrame(() => { if (!c.ctx) return; c.setActiveElements(items); c.tooltip.setActiveElements(items, { x: px, y: c.chartArea.top }); c.update(); });
   },
   afterDatasetsDraw(c) {
-    const a = sheetOn() && c.tooltip?.getActiveElements()[0]; if (!a) return;
+    const a = phone() && c.tooltip?.getActiveElements()[0]; if (!a) return;
     const { ctx, chartArea: r } = c; ctx.save(); ctx.strokeStyle = css("--fg"); ctx.globalAlpha = .5; ctx.beginPath(); ctx.moveTo(a.element.x, r.top); ctx.lineTo(a.element.x, r.bottom); ctx.stroke(); ctx.restore();
   } };
 function renderCharts() {
@@ -772,12 +772,12 @@ function renderWind(s) {
 // touch: a tap shows the nearest point's tooltip and it stays until a tap elsewhere (outside ~20 px of a point, or off the canvas). Listeners on the canvas survive chart re-creation.
 const tipAt = new WeakMap(), clearTip = c => { tipAt.delete(c); if (!c.tooltip.getActiveElements().length) return; c.setActiveElements([]); c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update(); };
 for (const cid of ["cond", "snow", "wind"]) document.getElementById(cid).addEventListener("click", e => {
-  const c = charts[cid]; if (!c || !e.pointerType || e.pointerType === "mouse" || sheetOn()) return; // the sheet keeps its cursor
+  const c = charts[cid]; if (!c || !e.pointerType || e.pointerType === "mouse" || phone()) return; // the sheet keeps its cursor
   const r = c.canvas.getBoundingClientRect(), p = { native: true, x: e.clientX - r.left, y: e.clientY - r.top }; // native: marks x/y as canvas coordinates for Chart.js
   const was = tipAt.get(c); // tapping the point already shown toggles it off
   setTimeout(() => { tipAt.set(c, c.tooltip.getActiveElements().map(a => a.datasetIndex + ":" + a.index).join()); if (c === charts[cid] && was && was === tipAt.get(c) && c.tooltip.opacity) return clearTip(c); if (c === charts[cid] && !c.getElementsAtEventForMode(p, "nearestX", { intersect: false }).some(m => Math.abs(m.element.x - p.x) <= 20 && !m.element.skip)) clearTip(c); }, 50); // after Chart.js's own (rAF-throttled) event handling
 });
-document.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse" && !sheetOn()) for (const cid in charts) if (charts[cid] && !charts[cid].canvas.contains(e.target)) clearTip(charts[cid]); });
+document.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse" && !phone()) for (const cid in charts) if (charts[cid] && !charts[cid].canvas.contains(e.target)) clearTip(charts[cid]); });
 
 // banner when the last successful refresh is too old (health.json run time, else stations.json updated)
 function renderBanner() {
@@ -822,8 +822,8 @@ document.getElementById("stnSel").addEventListener("change", e => select(e.targe
 document.addEventListener("click", e => { // every .seg[data-chart] window switch
   const b = e.target.closest(".seg[data-chart] button"); if (!b) return;
   const k = b.closest(".seg").dataset.chart; win[k] = winOr(+b.dataset.h, win[k]);
-  for (const x of sheetOn() ? Object.keys(win) : [k]) { win[x] = win[k]; try { localStorage.setItem(winKey(x), win[x]); } catch {} } // the sheet: one shared window
-  if (sheetOn()) return renderCharts();
+  for (const x of phone() ? Object.keys(win) : [k]) { win[x] = win[k]; try { localStorage.setItem(winKey(x), win[x]); } catch {} } // the sheet: one shared window
+  if (phone()) return renderCharts();
   const s = state.stations.find(x => x.id === state.selected); if (s && typeof Chart !== "undefined") chartRedraw[k]?.(s);
 });
 document.getElementById("condRh").addEventListener("change", () => condRedraw());

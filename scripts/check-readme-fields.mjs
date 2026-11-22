@@ -6,7 +6,6 @@ const keys = new Set();
 const add = (o) => Object.keys(o).forEach((k) => keys.add(k));
 const stations = read("stations"), danger = read("danger");
 add(stations); stations.stations.forEach((s) => { add(s); add(s.flags); if (s.dates) add(s.dates); }); // flags/dates keys are fields or "station"
-Object.values(read("readings")).forEach(add); // slot keys are dynamic; the keys inside a slot are the fields
 const hourly = read("hourly");
 add(hourly); add(hourly.model);
 Object.values(hourly.hours).forEach(add); // hour keys are dynamic; the keys inside an hour are the fields

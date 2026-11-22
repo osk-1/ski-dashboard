@@ -64,7 +64,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           mkdir -p data
-          for f in stations readings danger hourly; do
+          for f in stations danger hourly; do
             curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json" -o "data/$f.json"
           done
           # optional: health.json is rewritten each run and fetch.py does not read it back, so a missing copy is fine
@@ -76,16 +76,14 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
-          r = json.load(open("data/readings.json"))
+          # stations.json only: an unreadable hourly.json must stay recoverable (fetch.py starts it empty and backfills)
           s = json.load(open("data/stations.json"))
-          assert isinstance(r, dict) and r, "readings.json empty"
           assert s.get("stations"), "stations.json empty"
           PY
       - if: steps.gate.outputs.run == 'true'
         run: python3 fetch.py --selftest
-      # --days 2 refills yesterday's slots too, in case a run was skipped
       - if: steps.gate.outputs.run == 'true'
-        run: python3 fetch.py --days 2
+        run: python3 fetch.py
       - name: Assemble site
         if: steps.gate.outputs.run == 'true'
         run: |
