@@ -426,6 +426,17 @@ def selftest():
         fetch.MET_SECONDS = budget
     assert fmodel == {} and warning.endswith("; MET Norway failed for: A, B"), (fmodel, warning)
 
+    # get_json(): one retry after a transient error (sleep patched); a second failure is raised
+    with mock.patch.object(fetch.time, "sleep"), mock.patch.object(fetch.urllib.request, "urlopen", side_effect=[OSError("blip"), io.BytesIO(b'{"a":1}')]):
+        assert fetch.get_json("https://example.invalid/x") == {"a": 1}
+    with mock.patch.object(fetch.time, "sleep"), mock.patch.object(fetch.urllib.request, "urlopen", side_effect=OSError("down")) as uo:
+        try:
+            fetch.get_json("https://example.invalid/x")
+            raise AssertionError("second failure was not raised")
+        except OSError:
+            pass
+        assert uo.call_count == 2, uo.call_count
+
 
 class FetchTests(unittest.TestCase):
     def test_helpers(self):

@@ -110,8 +110,14 @@ REFERENCE = {
 
 
 def get_json(url):
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
-        return json.load(r)
+    for attempt in (1, 2):  # one retry on transient network errors; bad JSON is not retried
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
+                return json.load(r)
+        except (OSError, http.client.HTTPException):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def snapshot_url(slot_local):
