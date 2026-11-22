@@ -335,6 +335,9 @@ def selftest():
     # backfill: newest missing hours first, at most BACKFILL_MAX per run
     mh = missing_hours({}, STATIONS, now)
     assert (len(backfill(mh)), backfill(mh)[0], backfill(mh)[-1], backfill(mh[:3])) == (48, mh[-1], mh[-48], mh[2::-1])
+    # an archive hour already fetched fine is not requested again, even though it has no value
+    done = {mh[5].strftime("%Y-%m-%dT%H")}
+    assert missing_hours({}, STATIONS, now, done) == mh[:5] + mh[6:]
     # a fallback run (no sd/sm) must not erase earlier Open-Meteo hours
     hm = {"2026-11-20T12": {"sd": {"A": 50.0}, "mt": {"A": 1.0, "B": 2.0}}}
     merge_model(hm, {"2026-11-20T12": {"mt": {"A": -3.0}, "sd": {}}})

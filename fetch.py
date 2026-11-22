@@ -46,6 +46,7 @@ STATIONS = (
     "IPIS1",
 )
 HOURLY_DAYS = 7
+UTC_KEY = "%Y-%m-%dT%H"  # hourly.json "tried": archive hours fetched fine, so an hour with no Tirol value is not requested again
 BACKFILL_MAX, BACKFILL_SECONDS = 48, 300  # Tirol archive files per run (newest missing hours first) and wall-clock budget; the rest wait for later runs
 MET_SECONDS = 120  # wall-clock budget for the MET Norway fallback loop; stations not reached in time are named as failed
 MFIELDS = ("pm", "sm", "mt", "sd", "mw", "mg", "md")  # model fields
@@ -327,12 +328,13 @@ def tirol_hours(feats, by_uuid):
     return out
 
 
-def missing_hours(hours, ids, now):
-    """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value."""
+def missing_hours(hours, ids, now, tried=()):
+    """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value
+    and whose archive file was not already fetched fine (tried: UTC hour keys)."""
     have = {k for k, v in hours.items() if any(id in v.get(f, {}) for f in MEASURED for id in ids)}
     t = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)  # step in UTC: local wall hours skip/repeat on DST days
     out = [t - timedelta(hours=i) for i in range(HOURLY_DAYS * 24, 0, -1)]
-    return [x for x in out if hkey(x) not in have]
+    return [x for x in out if hkey(x) not in have and x.strftime(UTC_KEY) not in tried]
 
 
 def backfill(missing):
@@ -632,7 +634,8 @@ def main():
             print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
         hourly = {"model": {"source": None, "issued": None}, "hours": {}}
         hours = hourly["hours"]
-    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now), time.monotonic()
+    tried = set(hourly.get("tried", []))
+    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now, tried), time.monotonic()
     todo = backfill(miss)  # Tirol archive: only hours not yet recorded, capped so a slow archive can't time out the job
     for i, t in enumerate(todo):
         if time.monotonic() - t0 > BACKFILL_SECONDS:
@@ -641,6 +644,7 @@ def main():
         try:
             for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
                 hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
+            tried.add(t.strftime(UTC_KEY))
         except Exception as e:
             print("skip hour", t.isoformat(), e, file=sys.stderr)
             bad += 1
@@ -691,6 +695,8 @@ def main():
         print("forecast failed:", e, file=sys.stderr)
         fail("model", e)
     hs_rise(hours, STATIONS)
+    lo = (now.astimezone(timezone.utc) - timedelta(days=HOURLY_DAYS)).strftime(UTC_KEY)
+    hourly["tried"] = sorted(k for k in tried if k >= lo)
     hourly["hours"] = {k: {f: m for f, m in v.items() if m} for k, v in prune_hours(hours, now).items()}  # empty maps omitted
     hour_flags(hourly["hours"])
     out["data/hourly.json"] = json.dumps(hourly, sort_keys=True, separators=(",", ":"))
