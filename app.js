@@ -141,7 +141,7 @@ function nsPanel() {
   for (const w of WX) lp.querySelector(`[data-n="${w[0]}"]`).textContent = nsErr[w[0]] ? "unavailable" : ""; // only the selected one is tried; the note stays until a retry
   if (!lay.wx || !nsC()) { x.innerHTML = ""; return; }
   const ma = Date.parse(nsRange().maxAnalysisTimestamp), ends = nsEnds(), opt = t => `<option value="${t}"${t === nsEnd ? " selected" : ""}>${esc(fmtSlot(t))}</option>`, on = nsKf().length > 1 ? lay.nsw : 0;
-  if (lay.wx !== "new-snow") x.innerHTML = `<div class="seg nsw" role="group" aria-label="Time window">${NSW.map(w => `<button type="button" data-ns="w${w}" aria-pressed="${w === on}"${w && nsKeys(ends, w, nsEnd).length < 2 ? ` disabled title="${w > 0 ? "No forecast for this layer" : "No data this far back"}"` : ""}>${w ? nsMinus((w > 0 ? "+" : "") + w) : "Now"}</button>`).join("")}</div>` +
+  if (lay.wx !== "new-snow") x.innerHTML = `<div class="seg nsw" role="group" aria-label="Time window">${NSW.map(w => `<button type="button" data-ns="w${w}" aria-pressed="${w === on}"${w && nsKeys(ends, w, nsEnd).length < 2 ? ` aria-disabled="true" title="${w > 0 ? "No forecast for this layer" : "No data this far back"}"` : ""}>${w ? nsMinus((w > 0 ? "+" : "") + w) : "Now"}</button>`).join("")}</div>` + (nsKeys(ends, 3, nsEnd).length < 2 ? `<small class="nsn">No forecast for this layer</small>` : "") + // the hint must reach touch screens and screen readers too
     (on ? `<div class="nsp"><button type="button" data-ns="p" aria-label="${nsPlay ? "Pause" : "Play"}">${nsPlay ? "❚❚" : "▶"}</button><small>every ${nsStep(on)} h</small></div>` : "");
   else x.innerHTML = (nsC().timeRanges.length > 1 ? `<label><span>Period</span><select data-ns="h">${nsC().timeRanges.map(r => `<option value="${esc(r.timeRange)}"${r === nsRange() ? " selected" : ""}>${esc(r.timeRange)} h</option>`).join("")}</select></label>` : "") +
     `<label><span>Until</span><select data-ns="t">${[["Forecast", t => t > ma], ["Past", t => t <= ma]].map(([l, f]) => ends.some(f) ? `<optgroup label="${l}">${ends.filter(f).map(opt).join("")}</optgroup>` : "").join("")}</select></label>`;
@@ -170,22 +170,22 @@ const nsMap = (cfg, W, H) => (cfg.idx ??= {})[W + "x" + H] ??= (() => {
     m[j * w + i] = col >= 0 && col < W && row >= 0 && row < H ? row * W + col : -1;
   }
   return { w, h, m }; })();
-// PNG (R = value) -> its R channel, cached by url like the GIF
+// PNG (R = value) -> its R channel only (1/4 of the memory; up to 9 per click), cached by url like the GIF
 const nsPng = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
-  const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); ok({ W: im.width, H: im.height, d: g.getImageData(0, 0, im.width, im.height).data }); } catch (e) { no(e); } }; im.src = url; });
+  const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const px = g.getImageData(0, 0, im.width, im.height).data, d = new Uint8Array(px.length >> 2); for (let i = 0; i < d.length; i++) d[i] = px[i * 4]; ok({ W: im.width, H: im.height, d }); } catch (e) { no(e); } }; im.src = url; });
 function nsClick(e) { // value of the weather PNGs under the click, as a pin with a tooltip that follows the animation
   if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive")) return; // stations and their value tags are not map spots
   const p = nsAt = { ll: e.latlng, g: nsGo, v: [] }, k = lay.wx, cfg = nsC(), tpl = nsRange().dataOverlayURL; nsPin?.remove(); nsPin = null;
   nsGo.keys.forEach((T, i) => { const url = nsUrl(tpl, T);
     (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (nsAt !== p) return; // clicked elsewhere, or the selection moved on while this loaded
-      const [col, row] = nsPix(p.ll.lat, p.ll.lng, W, H, cfg); p.v[i] = col >= 0 && col < W && row >= 0 && row < H ? nsDec(k, d[(row * W + col) * 4]) : NaN; nsTip(); },
+      const [col, row] = nsPix(p.ll.lat, p.ll.lng, W, H, cfg); p.v[i] = col >= 0 && col < W && row >= 0 && row < H ? nsDec(k, d[row * W + col]) : NaN; nsTip(); },
     () => { delete nsImg[url]; }); });
 }
 function nsTip() { // the pin's value at the current fade position; a keyframe whose PNG has not loaded yet gives way to the other
   const g = nsGo, p = nsAt, b = g?.B ? g.b : -1; if (!p || p.g !== g) return;
   const v = lerp(p.v[g.a], b < 0 ? null : p.v[b], g.t), k = lay.wx; if (v == null) return;
   const txt = `<b>${Number.isNaN(v) ? "–" : `${k === "new-snow" ? "+" : ""}${nsMinus(Math.round(v * 10) / 10)} ${esc(nsC().units)}${k === "new-snow" ? ` (${esc(nsRange().timeRange)} h)` : ""}`}</b>` +
-    (g.keys.length > 1 ? ` · ${esc(new Date(g.keys[b < 0 || g.t < .5 ? g.a : b]).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" }))}` : "");
+    (g.keys.length > 1 ? ` · ${(g.lbl ??= [])[b < 0 || g.t < .5 ? g.a : b] ??= esc(new Date(g.keys[b < 0 || g.t < .5 ? g.a : b]).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" }))}` : ""); // label cached per keyframe: a formatter per frame is wasted work
   if (!nsPin) nsPin = L.circleMarker(p.ll, { pane: "places", radius: 8, interactive: false, color: css("--fg"), weight: 2, fillOpacity: 0 }).addTo(map).bindTooltip(txt, { permanent: true, direction: "right", offset: [8, 0], className: "val" });
   else if (nsPin.txt !== txt) nsPin.setTooltipContent(txt);
   nsPin.txt = txt;
@@ -305,7 +305,7 @@ function initMap() {
       if (i.dataset.cat) lay.on[i.dataset.cat] = i.checked; else lay.hide = i.checked ? lay.hide.filter(x => x !== i.dataset.stn) : [...lay.hide, i.dataset.stn]; done(); });
     p.addEventListener("click", e => {
       const w = e.target.closest("input[data-wx]"); if (w?.dataset.wx && w.dataset.wx === lay.wx && nsErr[lay.wx]) { delete nsErr[lay.wx]; return done(); } // clicking the selected, failed overlay again retries (no change event fires)
-      const t = e.target.closest("button"); if (!t) return;
+      const t = e.target.closest("button"); if (!t || t.ariaDisabled) return; // aria-disabled buttons stay focusable and keep their hint
       if (t.dataset.ns === "p") { nsPlay = !nsPlay; cancelAnimationFrame(nsRaf); if (nsPlay && nsOv && nsGo.keys.length > 1) { delete nsGo.ms; nsRaf = requestAnimationFrame(nsTick); } return nsPanel(); }
       if (t.dataset.ns) { lay.nsw = +t.dataset.ns.slice(1); delete nsErr[lay.wx]; return done(); }
       const [c, on] = t.dataset.set.split(":"), ids = state.stations.filter(s => catOf(s) === c).map(s => s.id);

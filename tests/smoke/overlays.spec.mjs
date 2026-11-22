@@ -67,7 +67,7 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(1);
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await radio(page, "Snow depth").check();
-  await expect(page.locator('#lp [data-ns="w3"]')).toBeDisabled(); // analysis only
+  await expect(page.locator('#lp [data-ns="w3"]')).toHaveAttribute("aria-disabled", "true"); // analysis only
   await expect(page.locator('#lp [data-ns="w-3"]')).toBeEnabled();
   // the danger checkbox is independent of the radio group
   const danger = page.locator("#lp label", { hasText: "Avalanche danger" }).locator("input");
@@ -197,7 +197,10 @@ test("Snow depth disables the + buttons", async ({ browser }) => {
   const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
   await openPanel(page);
   await radio(page, "Snow depth").check();
-  for (const h of [3, 6, 12, 24, 48]) await expect(page.locator(`#lp [data-ns="w${h}"]`)).toBeDisabled();
+  for (const h of [3, 6, 12, 24, 48]) await expect(page.locator(`#lp [data-ns="w${h}"]`)).toHaveAttribute("aria-disabled", "true");
+  await expect(page.locator("#lp .nsn")).toHaveText("No forecast for this layer"); // visible, not only a hover title
+  await page.locator('#lp [data-ns="w6"]').click({ force: true }); // a click on a disabled window does nothing
+  await expect(page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true");
 });
 
 test("a clicked pin's value changes while animating", async ({ browser }) => {
@@ -227,4 +230,38 @@ test("reduced motion starts paused", async ({ browser }) => {
   await expect(page.locator('#lp [data-ns="p"]')).toHaveAttribute("aria-label", "Pause");
   await seen(page, 2);
   expect(problems).toEqual([]);
+});
+
+// all hourly images of a window fail -> the layer says unavailable; one failing frame is skipped and the loop keeps running
+const failGifs = (page, hours) => page.route(`${BASE}/temp/**/*.gif`, (r) => r.request().url().match(/_(\d\d)-00_/) && (hours === "all" || hours.includes(r.request().url().match(/_(\d\d)-00_/)[1])) ? r.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "" }) : r.fallback());
+
+test("a failing keyframe is skipped, the animation keeps going", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await failGifs(page, ["22"]);
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await seen(page, 3);
+  await expect(page.locator('#lp [data-n="temp"]')).toHaveText("");
+});
+
+test("every keyframe failing shows unavailable", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await failGifs(page, "all");
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator('#lp [data-n="temp"]')).toHaveText("unavailable");
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(0);
+});
+
+test("saved window is restored, a bad one falls back to Now", async ({ browser }) => {
+  let o = await open(browser, DESKTOP, "light", { desktop: true, setup: setup(), storage: { layers: JSON.stringify({ wx: "temp", nsw: 6 }) } });
+  await openPanel(o.page);
+  await expect(o.page.locator('#lp [data-ns="w6"]')).toHaveAttribute("aria-pressed", "true");
+  await o.page.locator('#lp [data-ns="w12"]').click();
+  expect(await o.page.evaluate(() => JSON.parse(localStorage.getItem("layers")).nsw)).toBe(12);
+  o = await open(browser, DESKTOP, "light", { desktop: true, setup: setup(), storage: { layers: JSON.stringify({ wx: "temp", nsw: 7 }) } });
+  await openPanel(o.page);
+  await expect(o.page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true");
 });
