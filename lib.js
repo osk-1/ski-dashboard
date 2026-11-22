@@ -273,8 +273,10 @@ const bandStats = (stations, hours, now, h) => {
       out[b][f] = r1(median(per.map(p => p[f])));
       out[b][f + "N"] = per.filter(p => p[f] != null).length;
     }
-    for (const f of ["snowLastH", "snowNextH"])
-      out[b][f] = median(per.map(p => p[f])) == null ? null : Math.round(median(per.map(p => p[f])));
+    for (const f of ["snowLastH", "snowNextH"]) {
+      const m = median(per.map(p => p[f]));
+      out[b][f] = m == null ? null : Math.round(m);
+    }
   }
   return out;
 };
