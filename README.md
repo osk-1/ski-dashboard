@@ -59,7 +59,7 @@ from, or named differently than, its entry in `REFERENCE` (or has none). Jump, s
 | Avalanche danger | Euregio CAAMLv6 bulletin `https://static.avalanche.report/bulletins/latest/EUREGIO_en_CAAMLv6.json` and LWD Vorarlberg `https://static.lawinen-warnung.eu/bulletins/latest/AT-08_en_CAAMLv6.json` (same format) |
 | Map relief | Leaflet 1.9.4 (cdnjs) with Esri World Hillshade tiles `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer` (loaded in the browser; the map falls back to flat if they fail) |
 | Modelled weather (map overlays) | GeoSphere Austria model output as published by avalanche.report: `https://static.avalanche.report/zamg_meteo/overlays/<param>/config.json` and `…/{YYYY}/{YYYY-MM-DD}/{YYYY-MM-DD}_{HH}-00_<param>[_{6h…72h}].gif` (`.png` alongside holds the values, grey, R = G = B). One overlay at a time, loaded in the browser only when selected. The hourly ones (`temp`, `wind`, `gust`, `snow-height`) animate a time window: buttons −24 … +48 h (Now = one static frame), keyframes every 1/1/2/3/6 h (at most 9), a button is disabled when the data does not cover its whole window; a config older than 30 min is fetched again on the next pick; cross-faded in the browser (~10 s per loop, play/pause; reduced motion starts paused and shows the end the button names). A clicked point shows the value at the current hour. `snow-height` has no forecast. `new-snow` keeps its period and until selects. `new-snow` (cm; 6–72 h periods, R = cm), `temp` (°C, hourly, forecast ~53 h, °C = (R − 120) / 2), `wind` (km/h, hourly, R = km/h), `gust` (km/h, hourly, R = km/h), `snow-height` (cm, hourly, analysis only, R = cm). All but `gust` are on the Austria Lambert grid (EPSG:31287, reprojected in the browser, 500 m GIF / 1 km PNG); `gust` is a plain lat/lon box `[lon0, lat0, lon1, lat1]` and its GIF is opaque, so the border colour is cleared by flood fill from the edges. Licence not stated; the page credits GeoSphere Austria / avalanche.report |
-| Map place and peak coordinates (`PLACES`, `PEAKS` in `index.html`) | OpenStreetMap via Nominatim, checked 2026-11. St. Christoph uses its village node; Valluga is the OSM peak node; St. Anton, Pettneu and Ischgl keep their hand-entered values, because Nominatim only has municipality centroids for them (80–470 m away) |
+| Map place and peak coordinates (`PLACES`, `PEAKS` in `app.js`) | OpenStreetMap via Nominatim, checked 2026-11. St. Christoph uses its village node; Valluga is the OSM peak node; St. Anton, Pettneu and Ischgl keep their hand-entered values, because Nominatim only has municipality centroids for them (80–470 m away) |
 | Forecast | Open-Meteo (free tier), 7 days hourly. Falls back to MET Norway when Open-Meteo is unreachable (e.g. its shared daily quota is exhausted; recorded as `warning` on the `model` source) or its response can't be parsed (recorded as a failure); the fallback has no snowfall or snow-depth series |
 
 ## Run locally
@@ -71,13 +71,14 @@ python3 fetch.py
 
 ## Checks (CI)
 
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `fetch.py --selftest`), `js` (ESLint with the repo rules in `eslint-rules/`, `node --test`), `html` (html-validate, pinned + SRI check, secret scan, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `fetch.py --selftest`), `js` (ESLint with the repo rules in `eslint-rules/`, Prettier check on `app.js`/`lib.js`/`overlay.js`, `node --test`), `html` (html-validate, pinned + SRI check, secret scan, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
 
 Locally:
 
 ```bash
 npm ci
 npm run lint && npm test        # JS, HTML and repo checks
+npm run format                  # Prettier on app.js, lib.js, overlay.js
 npx playwright test --trace off # smoke test; screenshots in test-results/
 pip install -r requirements-dev.txt && ruff check . && ruff format --check .
 ```

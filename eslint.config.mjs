@@ -9,19 +9,24 @@ export default [
   { ignores: ["node_modules/", "data/", "test-results/", "playwright-report/"] },
   js.configs.recommended,
   {
-    files: ["app.js", "lib.js"], // classic scripts: top-level names are shared between them
+    files: ["app.js", "lib.js", "overlay.js"], // classic scripts: top-level names are shared between them
     languageOptions: { sourceType: "script", globals: { ...globals.browser, L: "readonly", Chart: "readonly", module: "readonly" } },
-    rules: { "no-empty": ["error", { allowEmptyCatch: true }] }, // storage access is wrapped in try { ... } catch {}
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }], // storage access is wrapped in try { ... } catch {}
+      eqeqeq: ["error", "always", { null: "ignore" }], // == null stays allowed: "null or undefined"
+      "no-var": "error",
+      "prefer-const": "error",
+    },
   },
-  { files: ["app.js"], languageOptions: { globals: Object.fromEntries(["tierOf", "groupByPixel", "describeGroup", "STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "extremeOf", "binSum", "sumField", "slice", "WINDOWS", "winOr", "tickStepH", "risePts", "delta", "latest", "extreme", "refroze", "valueState", "misplaced", "goodOnly", "refreshStale", "staleAfter", "offlineAfter", "bandOf", "BANDS", "median", "compass", "bandStats", "strongestGust", "nsKeys", "nsStep", "lerp"].map((n) => [n, "readonly"])) } }, // from lib.js
+  { files: ["app.js", "overlay.js"], languageOptions: { globals: Object.fromEntries(["tierOf", "groupByPixel", "describeGroup", "STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "extremeOf", "binSum", "sumField", "slice", "WINDOWS", "winOr", "tickStepH", "risePts", "delta", "latest", "extreme", "refroze", "valueState", "misplaced", "goodOnly", "refreshStale", "staleAfter", "offlineAfter", "bandOf", "BANDS", "median", "compass", "bandStats", "strongestGust", "nsKeys", "nsStep", "lerp"].map((n) => [n, "readonly"])) } }, // from lib.js
   {
     files: ["**/*.mjs", "**/*.js"],
-    ignores: ["app.js", "lib.js"],
+    ignores: ["app.js", "lib.js", "overlay.js"],
     languageOptions: { sourceType: "commonjs", globals: globals.node },
   },
   { files: ["**/*.mjs"], languageOptions: { sourceType: "module" } },
   {
-    files: ["app.js", "lib.js"],
+    files: ["app.js", "lib.js", "overlay.js"],
     plugins: { local },
     rules: {
       "local/storage-in-try": "error",
