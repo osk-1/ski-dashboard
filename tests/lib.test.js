@@ -234,16 +234,17 @@ const NS_H = 36e5, NOW = Date.UTC(2026, 0, 10, 12), ENDS = Array.from({ length: 
 test("nsStep: step table", () => {
   assert.deepEqual([-24, -12, -6, -3, 0, 3, 6, 12, 24, 48].map(nsStep), [3, 2, 1, 1, 1, 1, 1, 2, 3, 6]);
 });
-test("nsKeys: <= 8 ascending, on the step grid, include nowT", () => {
+test("nsKeys: <= 9 ascending, on the step grid, include nowT", () => {
   for (const w of [-24, -12, -6, -3, 3, 6, 12, 24, 48]) {
     const k = nsKeys(ENDS, w, NOW), s = nsStep(w) * NS_H;
-    assert.ok(k.length <= 8 && k.includes(NOW), `win ${w}`);
+    assert.ok(k.length <= 9 && k.includes(NOW) && k.includes(NOW + w * NS_H), `win ${w}`); // reaches the end the button names
     assert.deepEqual(k, [...k].sort((a, b) => a - b));
     assert.ok(k.every((t, i) => i === 0 || t - k[i - 1] === s) && k.every(t => (t - NOW) % s === 0 && (w < 0 ? t >= NOW + w * NS_H && t <= NOW : t >= NOW && t <= NOW + w * NS_H)), `win ${w}`);
   }
   assert.deepEqual(nsKeys(ENDS, 6, NOW), [0, 1, 2, 3, 4, 5, 6].map(i => NOW + i * NS_H));
   assert.deepEqual(nsKeys(ENDS, -12, NOW), [-12, -10, -8, -6, -4, -2, 0].map(i => NOW + i * NS_H));
-  assert.equal(nsKeys(ENDS, 48, NOW).length, 8);
+  assert.deepEqual(nsKeys(ENDS, 48, NOW), [0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => NOW + i * 6 * NS_H));
+  assert.deepEqual(nsKeys(ENDS, -24, NOW), [-8, -7, -6, -5, -4, -3, -2, -1, 0].map(i => NOW + i * 3 * NS_H));
 });
 test("nsKeys: Now, and clipped to the available range", () => {
   assert.deepEqual(nsKeys(ENDS, 0, NOW), [NOW]);

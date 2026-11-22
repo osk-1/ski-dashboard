@@ -143,10 +143,10 @@ const strongestGust = (hours, stations, now, h) => stations.reduce((a, s) => {
   const e = extremeOf(hours, "wg_boe", s.id, now - h * H + 1, now, true);
   return e && (!a || e.y > a.y) ? { y: e.y, id: s.id, k: e.k, wr: hours[e.k]?.wr?.[s.id] ?? null } : a;
 }, null);
-// weather-overlay animation: hours between keyframes per window (-24..+48; 0 = Now), keyframes ascending, on the ends grid, nowT always in, max 8 (the far end drops first)
+// weather-overlay animation: hours between keyframes per window (-24..+48; 0 = Now), keyframes ascending, on the ends grid, nowT always in, up to the named end nowT ± win (the step table keeps it to <= 9)
 const nsStep = w => ({ 48: 6, 24: 3, 12: 2 })[Math.abs(w)] || 1;
 const nsKeys = (ends, win, nowT) => { const s = nsStep(win) * 36e5, d = Math.sign(win), have = new Set(ends), out = [];
-  for (let k = 0; k <= Math.abs(win) * 36e5 / s && out.length < 8; k++) if (have.has(nowT + d * k * s)) out.push(nowT + d * k * s); else break; // a gap ends the run (the range is contiguous); nowT missing -> []
+  for (let k = 0; k <= Math.abs(win) * 36e5 / s; k++) if (have.has(nowT + d * k * s)) out.push(nowT + d * k * s); else break; // a gap ends the run (the range is contiguous); nowT missing -> []
   return out.sort((a, b) => a - b); };
 const lerp = (a, b, t) => a == null ? b : b == null ? a : a + (b - a) * t;
 if (typeof module !== "undefined") module.exports = { binSum, tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust, nsKeys, nsStep, lerp };
