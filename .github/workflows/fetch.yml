@@ -54,8 +54,11 @@ jobs:
             elif curl -fsS --retry 3 "$LIVE/stations.json" -o /tmp/live.json 2>/dev/null; then
               python3 - <<'PY' || run=false
           import json, datetime as d, sys, os
-          age = d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(json.load(open("/tmp/live.json"))["updated"])
-          sys.exit(0 if age > d.timedelta(minutes=int(os.environ["MAX_AGE_MIN"])) else 1)
+          try:
+              age = d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(json.load(open("/tmp/live.json"))["updated"])
+              sys.exit(0 if age > d.timedelta(minutes=int(os.environ["MAX_AGE_MIN"])) else 1)
+          except Exception:
+              sys.exit(0)  # any unreadable/corrupt live data counts as stale
           PY
             fi
           fi
@@ -84,13 +87,15 @@ jobs:
           PY
       - if: steps.gate.outputs.run == 'true'
         run: python3 fetch.py --selftest
+      # on push (code deploy) an upstream outage must not block shipping; the downloaded live data is redeployed
       - if: steps.gate.outputs.run == 'true'
+        continue-on-error: ${{ github.event_name == 'push' }}
         run: python3 fetch.py
       - name: Assemble site
         if: steps.gate.outputs.run == 'true'
         run: |
           mkdir _site
-          cp -r index.html lib.js app.js manifest.webmanifest icons data _site/
+          cp -r index.html lib.js overlay.js app.js manifest.webmanifest icons data _site/
       - if: steps.gate.outputs.run == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
