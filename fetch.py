@@ -3,7 +3,6 @@
 
 Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
-  data/forecast.json   7-day snowfall, min/max temperature and modelled depth per station
   data/hourly.json     {"model": {source, issued, fields: {field: {source, issued}}}, "hours": {local "YYYY-MM-DDTHH": {field: {stationId: value}}}}, rolling 7 days (+ model hours ahead); see README
   data/health.json     {run, sources: {tirol, tawes, vorarlberg, model, bulletins: {ok, error, detail}}, model also warning}, flagged, offline}; see README
   data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
@@ -458,26 +457,6 @@ def slots(days, now):
     return out
 
 
-def daily_snow_from_metno(timeseries, days):
-    """Sum MET Norway precipitation into local-day snowfall (cm). Returns {date: [snow_cm, tmin, tmax]}."""
-    acc = {}
-    for t in timeseries:
-        ts = datetime.fromisoformat(t["time"].replace("Z", "+00:00")).astimezone(TZ)
-        day = ts.date().isoformat()
-        if day not in days:
-            continue
-        temp = t["data"]["instant"]["details"]["air_temperature"]
-        # met.no gives hourly steps for ~2.5 days, then 6-hourly steps with only next_6_hours
-        nxt = t["data"].get("next_1_hours") or t["data"].get("next_6_hours")
-        mm = nxt["details"].get("precipitation_amount", 0) if nxt else 0
-        a = acc.setdefault(day, [0.0, temp, temp])
-        # shortcut: 1 mm water = 1 cm snow when <= 0.5 °C (10:1 ratio); real ratios vary 5–20:1
-        if temp <= 0.5:
-            a[0] += mm
-        a[1], a[2] = min(a[1], temp), max(a[2], temp)
-    return {d: [round(v[0], 1), v[1], v[2]] for d, v in acc.items()}
-
-
 LEVEL = {"low": 1, "moderate": 2, "considerable": 3, "high": 4, "very_high": 5}
 
 
@@ -513,24 +492,12 @@ def parse_danger(bulletin, ids):
     return out
 
 
-def parse_open_meteo(res, ids, days):
-    """Open-Meteo multi-point response -> (forecast.json points, {hour key: {field: {id: value}}} over MFIELDS).
-    The points (snowfall, tmin, tmax, depth per day) start at days[0]: the past_days entries of the daily/depth arrays are skipped.
+def parse_open_meteo(res, ids):
+    """Open-Meteo multi-point response -> {hour key: {field: {id: value}}} over MFIELDS.
     The model hours cover the whole hourly array, the past days included (they are re-modelled each run)."""
-    pts, model = {}, {}
+    model = {}
     for id, r in zip(ids, res):
-        h, d = r["hourly"], r["daily"]
-        i, j = d["time"].index(days[0]), h["time"].index(days[0] + "T00:00")
-        sd = h["snow_depth"][j:]  # metres, hourly
-        pts[id] = {
-            "snowfall": d["snowfall_sum"][i:],
-            "tmin": d["temperature_2m_min"][i:],
-            "tmax": d["temperature_2m_max"][i:],
-            "depth": [
-                None if all(v is None for v in sd[n * 24 : (n + 1) * 24]) else round(100 * max(v for v in sd[n * 24 : (n + 1) * 24] if v is not None))
-                for n in range(len(days))
-            ],
-        }
+        h = r["hourly"]
         for n, t in enumerate(h["time"]):
             g = lambda k: h[k][n]  # noqa: E731
             add(
@@ -544,7 +511,7 @@ def parse_open_meteo(res, ids, days):
                 mg=num(g("wind_gusts_10m")),
                 md=num(g("wind_direction_10m")),
             )
-    return pts, model
+    return model
 
 
 def metno_hourly(timeseries, ids):
@@ -591,10 +558,9 @@ def merge_model(hours, model, clear=False):
 
 
 def forecast(stations, fetch=get_json):
-    """-> (forecast.json dict, model hours, Open-Meteo parse error or None). A network error on Open-Meteo falls back to MET Norway and
-    is put in the dict's "warning" (health.json shows it, source still ok); a parse error (the API changed) falls back too but is
-    returned so the run records it as a failure in health.json."""
-    days = [(datetime.now(TZ).date() + timedelta(days=i)).isoformat() for i in range(7)]
+    """-> (model hours, source name, warning or None, Open-Meteo parse error or None). A network error on Open-Meteo falls back to
+    MET Norway and is returned as the warning (health.json shows it, source still ok); a parse error (the API changed) falls back too
+    but is returned so the run records it as a failure in health.json."""
     try:
         q = "&".join(
             [
@@ -604,37 +570,26 @@ def forecast(stations, fetch=get_json):
             ]
         )
         res = fetch(
-            "https://api.open-meteo.com/v1/forecast?" + q + "&daily=snowfall_sum,temperature_2m_min,temperature_2m_max"
-            "&hourly=snow_depth,snowfall,precipitation,temperature_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m"
+            "https://api.open-meteo.com/v1/forecast?"
+            + q
+            + "&hourly=snow_depth,snowfall,precipitation,temperature_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m"
             "&past_days=2&forecast_days=7&timezone=Europe%2FVienna"
         )
-        pts, model = parse_open_meteo(res if isinstance(res, list) else [res], [s["id"] for s in stations], days)
-        return {"source": "Open-Meteo", "days": days, "points": pts}, model, None
+        return parse_open_meteo(res if isinstance(res, list) else [res], [s["id"] for s in stations]), "Open-Meteo", None, None
     # HTTPError is a URLError; socket timeouts are OSError; a truncated body is IncompleteRead or JSONDecodeError
     except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError, json.JSONDecodeError) as e:
         print("Open-Meteo unreachable, falling back to MET Norway:", e, file=sys.stderr)
         perr = None
         down = f"Open-Meteo unreachable ({e}), using the MET Norway fallback"
-    except (KeyError, ValueError, TypeError, IndexError) as e:
-        print("Open-Meteo response not understood (parser broken?), falling back to MET Norway:", repr(e), file=sys.stderr)
-        perr = f"Open-Meteo response not understood: {e!r}"
-        down = None
     except Exception as e:  # anything else must still fall back, and is recorded as a parse failure
         print("Open-Meteo response not understood (parser broken?), falling back to MET Norway:", repr(e), file=sys.stderr)
         perr = f"Open-Meteo response not understood: {e!r}"
         down = None
-    pts, model = {}, {}
+    model = {}
     for s in stations:
         r = fetch(f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={s['lat']:.4f}&lon={s['lon']:.4f}&altitude={s['alt']}")
-        d = daily_snow_from_metno(r["properties"]["timeseries"], days)
         merge_model(model, metno_hourly(r["properties"]["timeseries"], [s["id"]]))
-        pts[s["id"]] = {
-            "snowfall": [d.get(x, [None])[0] for x in days],
-            "tmin": [d[x][1] if x in d else None for x in days],
-            "tmax": [d[x][2] if x in d else None for x in days],
-            "depth": None,  # met.no has no snow-depth forecast
-        }
-    return {"source": "MET Norway (snowfall estimated from precipitation)", "days": days, "points": pts, "warning": down}, model, perr
+    return model, "MET Norway", down, perr
 
 
 def main(days):
@@ -747,14 +702,10 @@ def main(days):
         json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
     fsrc = "failed"
     try:  # secondary source: a failure must not abort the run
-        fc, model, perr = forecast(stations)
-        name = fc["source"].split(" (")[0]
+        model, name, warning, perr = forecast(stations)
         hourly["model"] = model_meta(hourly["model"], model, now, name, merge_model(hours, model, clear=name != "Open-Meteo"))
-        src["model"]["warning"] = fc.pop("warning", None)  # degraded but working: listed in the page's data checks
-        fc["generated"] = now.isoformat(timespec="minutes")
-        with open("data/forecast.json", "w") as fh:
-            json.dump(fc, fh)
-        fsrc = src["model"]["detail"] = fc["source"]
+        src["model"]["warning"] = warning  # degraded but working: listed in the page's data checks
+        fsrc = src["model"]["detail"] = name if name == "Open-Meteo" else "MET Norway (no snowfall or snow depth)"
         if perr:  # the fallback worked, but the primary model is broken: not silent
             fail("model", perr)
     except Exception as e:
@@ -809,7 +760,6 @@ def selftest():
         {"time": "2026-11-19T10:00:00Z", "data": {"instant": {"details": {"air_temperature": -3}}, "next_1_hours": {"details": {"precipitation_amount": 2}}}},
         {"time": "2026-11-19T11:00:00Z", "data": {"instant": {"details": {"air_temperature": 3}}, "next_1_hours": {"details": {"precipitation_amount": 5}}}},
     ]
-    assert daily_snow_from_metno(ts, ["2026-11-19"]) == {"2026-11-19": [2.0, -3, 3]}
     f = {
         "id": "u",
         "geometry": {"coordinates": [10.3, 47.1, 2400.7]},
@@ -1009,12 +959,6 @@ def selftest():
     assert [hd[k].get("hr") for k in sorted(hd)] == [None, {"SKAP2": 1.0}, None, {"SKAP2": 1.0}, {"SKAP2": 1.0}]  # 01 -> 03 CEST is one real hour
     assert sorted(prune_hours({"2026-11-13T07": 1, "2026-11-13T08": 1, "2026-11-25T23": 1}, now)) == ["2026-11-13T08", "2026-11-25T23"]
     om = {
-        "daily": {
-            "time": ["2026-11-18", "2026-11-19", "2026-11-20"],
-            "snowfall_sum": [9, 9, 2.0],
-            "temperature_2m_min": [9, 9, -5],
-            "temperature_2m_max": [9, 9, 0],
-        },
         "hourly": {
             "time": [f"2026-11-{d}T{h:02}:00" for d in (18, 19, 20) for h in range(24)],
             "snow_depth": [9.0] * 48 + [0.5] * 23 + [None],
@@ -1026,8 +970,7 @@ def selftest():
             "wind_direction_10m": [270] * 72,
         },
     }
-    pts, model = parse_open_meteo([om], ["A"], ["2026-11-20"])
-    assert pts == {"A": {"snowfall": [2.0], "tmin": [-5], "tmax": [0], "depth": [50]}}  # past_days entries skipped
+    model = parse_open_meteo([om], ["A"])
     assert (len(model), model["2026-11-18T00"], model["2026-11-20T23"]) == (
         72,
         {"pm": {"A": 0.2}, "sm": {}, "mt": {"A": -1.0}, "sd": {"A": 900.0}, "mw": {"A": 10.0}, "mg": {"A": 25.5}, "md": {"A": 270.0}},
@@ -1037,14 +980,13 @@ def selftest():
     # 7 days hourly: every variable present for every hour
     n7 = 7 * 24
     om7 = {
-        "daily": {"time": [f"2026-11-{20 + d}" for d in range(7)], "snowfall_sum": [0] * 7, "temperature_2m_min": [0] * 7, "temperature_2m_max": [0] * 7},
         "hourly": {
             "time": [(datetime(2026, 11, 20) + timedelta(hours=i)).strftime("%Y-%m-%dT%H:00") for i in range(n7)],
             **{k: [1.0] * n7 for k in ("snow_depth", "temperature_2m", "precipitation", "snowfall", "wind_speed_10m", "wind_gusts_10m", "wind_direction_10m")},
         },
     }
-    p7, m7 = parse_open_meteo([om7], ["A"], [f"2026-11-{20 + d}" for d in range(7)])
-    assert (len(p7["A"]["depth"]), len(m7), all(len(v["sd"]) == len(v["mw"]) == len(v["mg"]) == len(v["md"]) == 1 for v in m7.values())) == (7, n7, True)
+    m7 = parse_open_meteo([om7], ["A"])
+    assert (len(m7), all(len(v["sd"]) == len(v["mw"]) == len(v["mg"]) == len(v["md"]) == 1 for v in m7.values())) == (n7, True)
     # MET Norway: m/s -> km/h, gust optional, 6-hourly entry has no pm, local hour key across the CET -> CEST switch
     mn = lambda t, wind, extra=None, n1=None: {  # noqa: E731
         "time": t,
@@ -1184,16 +1126,16 @@ def selftest():
 
     cases = (
         (down, None, "unreachable"),
-        (lambda: {"hourly": {}}, "Open-Meteo response not understood: KeyError('daily')", "not understood"),
+        (lambda: {"hourly": {}}, "Open-Meteo response not understood: KeyError('time')", "not understood"),
         (truncated, None, "unreachable"),  # IncompleteRead: network, no parse failure
         (bad_json, None, "unreachable"),  # JSONDecodeError from a truncated body: network, not parser
         (attr, "Open-Meteo response not understood: AttributeError(\"'NoneType' object has no attribute 'get'\")", "not understood"),
     )
     for om_fail, want, log in cases:
         with contextlib.redirect_stderr(io.StringIO()) as err:
-            fc, fmodel, perr = forecast(stn, stub(om_fail))
-        assert fc["source"].startswith("MET Norway") and fc["points"]["A"]["depth"] is None and perr == want, (fc["source"], perr)
-        assert (fc["warning"] or "").startswith("Open-Meteo unreachable") == (want is None), fc["warning"]  # an outage is reported, not silent
+            fmodel, source, warning, perr = forecast(stn, stub(om_fail))
+        assert source == "MET Norway" and perr == want, (source, perr)
+        assert (warning or "").startswith("Open-Meteo unreachable") == (want is None), warning  # an outage is reported, not silent
         assert fmodel["2026-11-19T12"]["mt"] == {"A": 3.0} and fmodel["2026-11-19T12"]["sd"] == {}, fmodel
         assert log in err.getvalue(), err.getvalue()
         assert ("response not understood" in err.getvalue()) == (want is not None)

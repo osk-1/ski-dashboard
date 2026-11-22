@@ -5,7 +5,6 @@ test-results/
 playwright-report/
 .ruff_cache/
 data/stations.json
-data/forecast.json
 data/readings.json
 data/danger.json
 data/hourly.json
