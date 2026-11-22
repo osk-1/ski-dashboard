@@ -210,7 +210,7 @@ function nsShow() {
     () => { delete nsImg[url]; if (nsGo !== g) return; g.fr[i] = false; if (i === first && !nsOv) { const j = g.fr.findIndex(f => f); if (j >= 0) nsOpen(g, j); } if (g.keys.every((_, j) => g.fr[j] === false)) { nsStop(); nsErr[lay.wx] = true; nsPanel(); renderMap(); } }); }
   nsTrim(g);
 }
-function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); one loop of the window takes ~7 s
+function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); one loop of the window takes ~10 s
   const g = nsGo; if (nsPlay && g.ms != null && ms - g.ms < 32) { nsRaf = requestAnimationFrame(nsTick); return; } // ~30 fps is enough for a slow fade and halves the repaints
   const n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = nsPlay && requestAnimationFrame(nsTick); // paused: draw this frame, then stop (play restarts the loop)
   let b = g.a; do b = (b + 1) % n; while (g.fr[b] === false && b !== g.a); // a failed keyframe is skipped
@@ -218,7 +218,7 @@ function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); 
   if (!g.fr[b]) return; // the next one is still loading
   if (g.b !== b) { g.b = b; g.B ? g.B.setUrl(g.fr[b]) : nsOv.addLayer(g.B = nsOvl(g.fr[b], 0)); }
   if (!g.B.getElement().complete) return; // the new frame is still decoding: keep the current one, do not fade to blank
-  if (nsPlay) g.t += dt * n / 7000;
+  if (nsPlay) g.t += dt * n / 10000;
   if (g.t >= 1) { [g.A, g.B] = [g.B, g.A]; g.a = b; g.b = -1; g.t = 0; }
   g.A.setOpacity(.55 * (1 - g.t)); g.B.setOpacity(.55 * g.t); nsTip();
 }
