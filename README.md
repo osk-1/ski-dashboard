@@ -72,7 +72,7 @@ python3 fetch.py
 
 ## Checks (CI)
 
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `fetch.py --selftest`), `js` (ESLint with the repo rules in `eslint-rules/`, Prettier check on `app.js`/`lib.js`/`overlay.js`, `node --test`), `html` (html-validate, pinned + SRI check, secret scan, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: `python` (ruff check, ruff format --check, `python3 -m unittest discover tests`), `js` (ESLint with the repo rules in `eslint-rules/`, Prettier check on `app.js`/`lib.js`/`overlay.js`, `node --test`), `html` (html-validate, pinned + SRI check, secret scan, README field check), `workflows` (actionlint) and `smoke` (Playwright against `tests/fixtures/data`, 390 and 430 px, light and dark; screenshots are uploaded as an artifact).
 
 Locally:
 
