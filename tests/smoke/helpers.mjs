@@ -24,7 +24,6 @@ export async function open(browser, vp, scheme, overrides = {}) {
   await page.route(/^https?:\/\/(?!127\.0\.0\.1|cdnjs\.cloudflare\.com)/, (route) => {
     const url = route.request().url();
     if (url.includes("arcgisonline")) return route.fulfill({ contentType: "image/png", body: PNG });
-    if (url.includes("fonts.googleapis")) return route.fulfill({ contentType: "text/css", body: "" });
     return route.abort();
   });
   if (overrides.storage) await page.addInitScript((kv) => { try { for (const k in kv) localStorage.setItem(k, kv[k]); } catch { /* storage blocked */ } }, overrides.storage);

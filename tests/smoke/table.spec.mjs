@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 import { open, VIEWPORTS } from "./helpers.mjs";
 
 const fx = JSON.parse(readFileSync(new URL("../fixtures/data/stations.json", import.meta.url)));
-const mine = { tableOpen: "1", layers: JSON.stringify({ on: { snow: true, wind: true, weather: true } }) };
+const mine = { tableOpen: "1", layers: JSON.stringify({ on: { snow: true, wind: true } }) };
 const stale = JSON.stringify({ ...fx, stations: fx.stations.map((s) => (s.id === "KSIN2" ? { ...s, date: "2026-11-20T09:35:00+01:00" } : s)) });
 const hourly = JSON.parse(readFileSync(new URL("../fixtures/data/hourly.json", import.meta.url))).hours;
 const { delta, anchorMs } = createRequire(import.meta.url)("../../lib.js");

@@ -36,7 +36,6 @@ async function open(browser, vp, scheme, d) {
   await page.route(/^https?:\/\/(?!127\.0\.0\.1|cdnjs\.cloudflare\.com)/, (route) => {
     const url = route.request().url();
     if (url.includes("arcgisonline")) return route.fulfill({ contentType: "image/png", body: PNG });
-    if (url.includes("fonts.googleapis")) return route.fulfill({ contentType: "text/css", body: "" });
     return route.abort();
   });
   await page.clock.install({ time: new Date(d.stations.updated) }); // time flows from the run time; fastForward drives the minute re-check

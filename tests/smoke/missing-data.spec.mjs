@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 import { open, VIEWPORTS } from "./helpers.mjs";
 
 const fx = JSON.parse(readFileSync(new URL("../fixtures/data/stations.json", import.meta.url)));
-const mine = { tableOpen: "1", layers: JSON.stringify({ on: { snow: true, wind: true, weather: true } }) };
+const mine = { tableOpen: "1", layers: JSON.stringify({ on: { snow: true, wind: true } }) };
 const bad = JSON.stringify({ ...fx, stations: fx.stations.map((s) => (s.id === "KSIN2" ? { ...s, date: "n/a" } : s)) });
 
 for (const vp of VIEWPORTS) {

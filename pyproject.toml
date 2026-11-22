@@ -6,6 +6,7 @@ extend-exclude = ["node_modules"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]  # pycodestyle, pyflakes, import order
 ignore = [
+  "F405",  # star import in tests/test_fetch.py
   "E501",  # long comment/literal lines are left to the formatter
   "E731",  # fetch.py uses short local lambdas on purpose
 ]
