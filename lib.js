@@ -11,7 +11,8 @@ console.assert(Math.hypot(...lambert(47.1295, 10.2636).map((v, i) => v - [167256
 // Hourly series (data/hourly.json): hour keys are Vienna local "YYYY-MM-DDTHH"
 const H = 3600e3, MEASURED = ["lt", "oft", "rh", "hs", "hr", "pr", "wg", "wg_boe", "wr"];
 const VK = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" });
-const viennaKey = ms => { const p = Object.fromEntries(VK.formatToParts(ms).map(x => [x.type, x.value])); return `${p.year}-${p.month}-${p.day}T${p.hour}`; };
+// cached by UTC hour: Vienna's offset is a whole number of hours, so the cache is exact; it holds only the hours the page asks for
+const VKC = new Map(), viennaKey = ms => { const h = Math.floor(ms / H); if (VKC.has(h)) return VKC.get(h); const p = Object.fromEntries(VK.formatToParts(ms).map(x => [x.type, x.value])); const k = `${p.year}-${p.month}-${p.day}T${p.hour}`; VKC.set(h, k); return k; };
 // the UTC instant of a key: Vienna is UTC+1 or +2 (a key skipped by the spring DST change -> null)
 const keyMs = k => { const t = Date.UTC(+k.slice(0, 4), k.slice(5, 7) - 1, +k.slice(8, 10), +k.slice(11, 13)); return [t - H, t - 2 * H].find(x => viennaKey(x) === k) ?? null; };
 // "now" for the window: real time, or the newest measured hour when that is more than 7 days old (dead feed, test fixtures)

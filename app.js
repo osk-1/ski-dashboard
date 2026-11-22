@@ -869,8 +869,11 @@ async function load() {
   } finally { loading = false; }
 }
 load();
-// accuracy is judged against the clock: re-check every minute without refetching (charts keep their state)
-setInterval(() => { if (state.stations.length && accSig() !== lastSig) { lastSig = accSig(); renderBanner(); renderSummary(); renderMap(); renderTable(); renderChecks(); } }, 60e3);
+// accuracy is judged against the clock: re-check every minute (charts keep their state); a visible tab refetches after 30 min, since it never gets a visibilitychange (lastLoad 0 = failed first load, so it retries each minute, same as visibilitychange)
+setInterval(() => {
+  if (document.visibilityState === "visible" && Date.now() - lastLoad > 30 * 60e3) load();
+  if (state.stations.length && accSig() !== lastSig) { lastSig = accSig(); renderBanner(); renderSummary(); renderMap(); renderTable(); renderChecks(); }
+}, 60e3);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && Date.now() - lastLoad > 30 * 60e3) load();
 });
