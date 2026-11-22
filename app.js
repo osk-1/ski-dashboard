@@ -795,7 +795,7 @@ function renderChecks() {
     else if (v.warning) items.push(`<b>Source ${esc(k)} degraded</b> in the last run: ${esc(v.warning)}.`);
   if (!h) items.push("Source status unavailable (no data checks file from the last run).");
   for (const s of state.stations) if (!(now - Date.parse(s.date) <= offlineAfter)) off.set(s.id, { name: s.name, last: s.date });
-  for (const o of off.values()) items.push(`<b>${esc(o.name)}</b> offline: no measurement for over 24 h (last ${esc(fmtSlot(o.last))}).`);
+  for (const o of off.values()) items.push(`<b>${esc(o.name)}</b> offline: no measurement for over 24 h (last ${esc(fmtLast(Date.parse(o.last)))}).`);
   for (const s of state.stations) {
     if (misplaced(s)) { items.push(`<b>${esc(s.name)}</b> hidden from map, summary and table: location mismatch (reported position or name doesn't match the known station).`); continue; }
     const parts = Object.entries(s.flags || {}).map(([f, r]) => [f, `suspect: ${r} (${WHY[r] || "plausibility check"})`]);
@@ -847,7 +847,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll)
 new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 const note = document.getElementById("updated");
-let lastLoad = 0, loading = false;
+let lastLoad = 0, loading = false, hrFailed = false; // hrFailed: the last hourly.json fetch failed, so the next good one must redraw even with the same stations.json
 async function load() {
   if (loading) return;
   loading = true;
@@ -857,7 +857,8 @@ async function load() {
     try { res = await Promise.all([get("stations"), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null), get("health").catch(() => null)]); }
     catch { note.textContent = lastLoad ? `Refresh failed · showing data from ${fmtSlot(state.updated)}` : "Couldn't load station data. Reload the page to try again."; return; } // refresh failures keep old data
     const [st, dg, rg, hr, he] = res;
-    const changed = !lastLoad || st.updated !== state.updated || (!state.hourly && !!hr) || (!state.danger && !!dg) || (!state.regions && !!rg);
+    const changed = !lastLoad || st.updated !== state.updated || (!state.hourly && !!hr) || (!state.danger && !!dg) || (!state.regions && !!rg) || (hrFailed && !!hr);
+    hrFailed = !hr;
     state.danger = dg ?? state.danger; state.regions = rg ?? state.regions; // like hourly: a failed refresh keeps the polygons
     state.stations = st.stations || [];
     state.hourly = hr ?? state.hourly; state.health = he; state.updated = st.updated; // a failed hourly fetch keeps the charts' data
