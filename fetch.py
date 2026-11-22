@@ -110,15 +110,19 @@ REFERENCE = {
 }
 
 
-def get_json(url):
-    for attempt in (1, 2):  # one retry on transient network errors; bad JSON is not retried
+def get_bytes(url):
+    for attempt in (1, 2):  # one retry on transient network errors; a 4xx is not retried
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
-                return json.load(r)
+                return r.read()
         except (OSError, http.client.HTTPException) as e:
             if attempt == 2 or (isinstance(e, urllib.error.HTTPError) and e.code < 500):  # a 404 will not change in 2 s
                 raise
             time.sleep(2)
+
+
+def get_json(url):
+    return json.loads(get_bytes(url))  # bad JSON is not retried
 
 
 def snapshot_url(slot_local):
@@ -626,9 +630,7 @@ def merge_history(hours, tried, live, stations, by_uuid, now, src, note):
     for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
         if st["id"].startswith("VOR-"):
             try:
-                req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    txt = gzip.decompress(r.read()).decode()
+                txt = gzip.decompress(get_bytes(VOR + "woche/" + st["id"][4:] + ".smet.gz")).decode()
                 for k, vals in smet_hourly(smet_table(txt)).items():
                     hmerge(hours, k, {f: {st["id"]: v} for f, v in vals.items()})
             except Exception as e:
@@ -696,6 +698,7 @@ def main():
         with open("data/hourly.json") as fh:
             hourly = json.load(fh)
         hours = hourly["hours"]
+        hourly.setdefault("model", {"source": None, "issued": None})
     except (FileNotFoundError, ValueError, KeyError, TypeError) as e:
         if not isinstance(e, FileNotFoundError):
             print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
