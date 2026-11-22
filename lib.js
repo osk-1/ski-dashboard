@@ -112,7 +112,7 @@ const BANDS = [["valley", "Valley", "< 1,600 m"], ["mid", "Mid", "1,600-2,200 m"
 const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b), m = v.length >> 1; return v.length ? (v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2) : null; };
 const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8];
 // one point per hour key: the repeated 02:00 of the autumn DST change is one hour of data, not two
-const hourPts = (hours, field, id, from, to) => { const s = slice(hours, field, id, from, to); return s.filter((p, i) => s.findIndex(q => q.k === p.k) === i); };
+const hourPts = (hours, field, id, from, to) => { const seen = new Set(); return slice(hours, field, id, from, to).filter(p => !seen.has(p.k) && seen.add(p.k)); };
 // hours of `field` in [from, to] that have a value and are not flagged for this station
 const okPts = (hours, field, id, from, to) => hourPts(hours, field, id, from, to).filter(p => p.y != null && !hours[p.k]?.flags?.[id]?.[field]);
 // hr (HS rise) is clamped at 0 like risePts; of = hours in the window
