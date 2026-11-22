@@ -5,9 +5,8 @@ Writes:
   data/stations.json   current readings per station (snow height, wind, temperature)
   data/hourly.json     {"model": {source, issued, fields: {field: {source, issued}}}, "hours": {local "YYYY-MM-DDTHH": {field: {stationId: value}}}}, rolling 7 days (+ model hours ahead); see README
   data/health.json     {run, sources: {tirol, tawes, vorarlberg, model, bulletins: {ok, error, detail}}, model also warning}, flagged, offline}; see README
-  data/readings.json   {slot: {t, hs, lt, wg, wg_boe, wr}} history, each a {stationId: value} map in stations.json units (None omitted); slot = local "YYYY-MM-DDTHH", hours 07/12/17; merged, slots older than 60 days pruned
 
-Usage: python3 fetch.py [--days N]   # N = days of reading slots to (re)build, default 1
+Usage: python3 fetch.py
        python3 fetch.py --selftest
 """
 
@@ -26,8 +25,6 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Vienna")
-SLOT_HOURS = (7, 12, 17)
-KEEP_DAYS = 60
 # Feed IDs (LWD-Nummer, or feature id when none): snow stations, then wind stations
 STATIONS = (
     "SAUL2",
@@ -51,7 +48,6 @@ STATIONS = (
     "KGRO1",
     "IPIS1",
 )
-FIELDS = ("hs", "lt", "wg", "wg_boe", "wr")  # per-slot maps in readings.json
 HOURLY_DAYS = 7
 BACKFILL_MAX, BACKFILL_SECONDS = 48, 300  # Tirol archive files per run (newest missing hours first) and wall-clock budget; the rest wait for later runs
 MFIELDS = ("pm", "sm", "mt", "sd", "mw", "mg", "md")  # model fields
@@ -192,14 +188,6 @@ def add(maps, id, **vals):
     for k, v in vals.items():
         if v is not None:
             maps[k][id] = v
-
-
-def merge(readings, k, t, maps):
-    """Merge {field: {id: value}} into slot k; keeps other sources' ids and tolerates old slots lacking fields."""
-    slot = readings.setdefault(k, {})
-    slot["t"] = t
-    for f in FIELDS:
-        slot.setdefault(f, {}).update(maps.get(f, {}))
 
 
 def smet_table(text):
@@ -348,11 +336,6 @@ def backfill(missing):
     return sorted(missing, reverse=True)[:BACKFILL_MAX]
 
 
-def tirol_slot(hours, k):
-    """readings.json maps for slot k, Tirol ids only, from hours[k]: keyed by each feature's own measurement hour, so a stuck feed's old value never poses as the slot's."""
-    return {f: {id: x for id, x in hours.get(k, {}).get(f, {}).items() if id in STATIONS} for f in FIELDS}
-
-
 def hs_rise(hours, ids):
     """hr[id] at k = positive HS change from the hour before (0 when it fell or stayed); only where both hours have hs."""
     for k, v in hours.items():
@@ -439,22 +422,6 @@ def carry(path, src):
         return []
     print(f"carrying over {len(prev)} {src} stations from the last run", file=sys.stderr)
     return prev
-
-
-def prune(readings, now):
-    cutoff = (now - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%dT00")  # keys sort lexicographically
-    return {k: v for k, v in readings.items() if k >= cutoff}
-
-
-def slots(days, now):
-    out = []
-    for d in range(days - 1, -1, -1):
-        day = (now - timedelta(days=d)).date()
-        for h in SLOT_HOURS:
-            s = datetime(day.year, day.month, day.day, h, tzinfo=TZ)
-            if s <= now:
-                out.append(s)
-    return out
 
 
 LEVEL = {"low": 1, "moderate": 2, "considerable": 3, "high": 4, "very_high": 5}
@@ -592,7 +559,7 @@ def forecast(stations, fetch=get_json):
     return model, "MET Norway", down, perr
 
 
-def main(days):
+def main():
     now = datetime.now(TZ)
     src = {k: {"ok": True, "error": None, "detail": None} for k in ("tirol", "tawes", "vorarlberg", "model", "bulletins")}  # health.json
 
@@ -628,11 +595,6 @@ def main(days):
 
     os.makedirs("data", exist_ok=True)
     try:
-        with open("data/readings.json") as fh:
-            readings = json.load(fh)
-    except FileNotFoundError:
-        readings = {}
-    try:
         with open("data/hourly.json") as fh:
             hourly = json.load(fh)
         hours = hourly["hours"]
@@ -663,19 +625,12 @@ def main(days):
     except Exception as e:
         print("live hour failed:", e, file=sys.stderr)
         note("tirol", f"live hour failed: {e}")
-    sl = slots(days, now)
-    iso = {s.strftime("%Y-%m-%dT%H"): s.isoformat() for s in sl}
-    for k, t in iso.items():  # Tirol slots from the date-checked hours (only the 7-day window: older --days slots get no Tirol values)
-        if any((maps := tirol_slot(hours, k)).values()):
-            merge(readings, k, t, maps)  # merge: keep other sources' ids (TAWES)
-    try:  # TAWES slots and hours, one historical request
+    try:  # TAWES hours, one historical request
         u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
-        start = min(sl[:1] + [now - timedelta(days=HOURLY_DAYS, hours=1)])  # whole window each run, so TAWES gaps heal on their own
+        start = now - timedelta(days=HOURLY_DAYS, hours=1)  # whole window each run, so TAWES gaps heal on their own
         gj = get_json(GEO + "historical/tawes-v1-10min?parameters=TL,RF,RR,SCHNEE,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(start)}&end={u(now)}")
         for k, maps in tawes_hourly(gj).items():
             hmerge(hours, k, maps)
-            if k in iso:
-                merge(readings, k, iso[k], {f: maps[f] for f in FIELDS})
     except Exception as e:
         print("TAWES history failed:", e, file=sys.stderr)
         src["tawes"]["detail"] = f"history failed: {e}"
@@ -687,15 +642,9 @@ def main(days):
                     txt = gzip.decompress(r.read()).decode()
                 for k, vals in smet_hourly(smet_table(txt)).items():
                     hmerge(hours, k, {f: {st["id"]: v} for f, v in vals.items()})
-                    if k in iso:
-                        merge(readings, k, iso[k], {f: {st["id"]: v} for f, v in vals.items() if f in FIELDS})
             except Exception as e:
                 print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
                 note("vorarlberg", f"history failed: {st['id']} {e}")
-    readings = prune(readings, now)
-    with open("data/readings.json", "w") as fh:
-        json.dump(readings, fh, sort_keys=True, separators=(",", ":"))
-
     for st in stations:
         st["flags"] = check(st, hours, now)
     with open("data/stations.json", "w") as fh:
@@ -746,16 +695,13 @@ def main(days):
     }
     with open("data/health.json", "w") as fh:
         json.dump(health, fh)
-    print(f"{len(stations)} stations, {len(readings)} reading slots, {len(hourly['hours'])} hours, forecast: {fsrc}")
+    print(f"{len(stations)} stations, {len(hourly['hours'])} hours, forecast: {fsrc}")
 
 
 def selftest():
-    r = {"2026-09-20T12": {}, "2026-09-21T07": {}, "2026-11-19T07": {}}
-    assert sorted(prune(r, datetime(2026, 11, 20, 8, tzinfo=TZ))) == ["2026-09-21T07", "2026-11-19T07"]  # cutoff 2026-09-21
     s = datetime(2026, 11, 19, 7, tzinfo=TZ)
     assert snapshot_url(s).endswith("2026-11-19_06-00_stations.geojson")
     assert snapshot_url(datetime(2026, 7, 1, 7, tzinfo=TZ)).endswith("2026-07-01_05-00_stations.geojson")  # summer time
-    assert [x.hour for x in slots(1, datetime(2026, 11, 19, 13, tzinfo=TZ))] == [7, 12]
     ts = [
         {"time": "2026-11-19T10:00:00Z", "data": {"instant": {"details": {"air_temperature": -3}}, "next_1_hours": {"details": {"precipitation_amount": 2}}}},
         {"time": "2026-11-19T11:00:00Z", "data": {"instant": {"details": {"air_temperature": 3}}, "next_1_hours": {"details": {"precipitation_amount": 5}}}},
@@ -858,10 +804,6 @@ def selftest():
         {},
         {},
     )
-    no = {"hs": {}, "lt": {}, "wg": {}, "wg_boe": {}, "wr": {}}
-    old = {"2026-11-19T07": {"t": "x", "hs": {"A": 1.0}}}  # old slot without the new maps
-    merge(old, "2026-11-19T07", "t", {"hs": {"B": 2.0}, "lt": {"A": -1.0}})
-    assert old == {"2026-11-19T07": {"t": "t", **no, "hs": {"A": 1.0, "B": 2.0}, "lt": {"A": -1.0}}}
     vf = {
         "id": "v",
         "geometry": {"coordinates": [10.170777, 47.173592, 1920]},
@@ -1075,12 +1017,6 @@ def selftest():
     # backfill: newest missing hours first, at most BACKFILL_MAX per run
     mh = missing_hours({}, STATIONS, now)
     assert (len(backfill(mh)), backfill(mh)[0], backfill(mh)[-1], backfill(mh[:3])) == (48, mh[-1], mh[-48], mh[2::-1])
-    # Tirol slots: a stale feature (date older than its file's hour) lands at its own hour, not the slot; other sources' ids stay out
-    sl = {**th, "2026-11-20T07": {**th["2026-11-20T07"], "lt": {**th["2026-11-20T07"]["lt"], "TAWES-11311": 1.0}}}
-    assert (tirol_slot(sl, "2026-11-20T07"), tirol_slot(sl, "2026-11-20T08")) == (
-        {"hs": {"SKAP2": 30.8}, "lt": {"SKAP2": -2.8}, "wg": {}, "wg_boe": {}, "wr": {}},
-        {f: {} for f in FIELDS},
-    )
     # a fallback run (no sd/sm) must not erase earlier Open-Meteo hours
     hm = {"2026-11-20T12": {"sd": {"A": 50.0}, "mt": {"A": 1.0, "B": 2.0}}}
     merge_model(hm, {"2026-11-20T12": {"mt": {"A": -3.0}, "sd": {}}})
@@ -1146,4 +1082,4 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
     else:
-        main(int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else 1)
+        main()
