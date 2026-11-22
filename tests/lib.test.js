@@ -249,6 +249,7 @@ test("nsKeys: Now, and clipped to the available range", () => {
   assert.deepEqual(nsKeys(ENDS, 0, NOW), [NOW]);
   assert.deepEqual(nsKeys(ENDS.filter(t => t <= NOW), 48, NOW), [NOW]); // snow height: no forecast
   assert.deepEqual(nsKeys(ENDS.filter(t => t <= NOW), 3, NOW), [NOW]);
+  assert.deepEqual(nsKeys(ENDS.filter(t => t !== NOW), 6, NOW), []); // nowT off the grid or outside the range: no keyframes (app falls back to the single nowT frame)
   assert.deepEqual(nsKeys(ENDS.filter(t => t >= NOW - 2 * NS_H), -6, NOW), [-2, -1, 0].map(i => NOW + i * NS_H));
 });
 test("lerp: ends, middle, null-safe", () => {

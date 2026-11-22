@@ -202,7 +202,7 @@ function nsShow() {
     () => { delete nsImg[url]; if (nsGo !== g) return; g.fr[i] = false; if (g.keys.every((_, j) => g.fr[j] === false)) { nsStop(); nsErr[lay.wx] = true; nsPanel(); renderMap(); } }); }
 }
 function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); one loop of the window takes ~7 s
-  const g = nsGo, n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = requestAnimationFrame(nsTick);
+  const g = nsGo, n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = nsPlay && requestAnimationFrame(nsTick); // paused: draw this frame, then stop (play restarts the loop)
   let b = g.a; do b = (b + 1) % n; while (g.fr[b] === false && b !== g.a); // a failed keyframe is skipped
   if (b === g.a || !g.fr[b]) return; // one good frame only, or the next one is still loading
   if (g.b !== b) { g.b = b; g.B ? g.B.setUrl(g.fr[b]) : nsOv.addLayer(g.B = nsOvl(g.fr[b], 0)); }
@@ -306,7 +306,7 @@ function initMap() {
     p.addEventListener("click", e => {
       const w = e.target.closest("input[data-wx]"); if (w?.dataset.wx && w.dataset.wx === lay.wx && nsErr[lay.wx]) { delete nsErr[lay.wx]; return done(); } // clicking the selected, failed overlay again retries (no change event fires)
       const t = e.target.closest("button"); if (!t) return;
-      if (t.dataset.ns === "p") { nsPlay = !nsPlay; return nsPanel(); }
+      if (t.dataset.ns === "p") { nsPlay = !nsPlay; cancelAnimationFrame(nsRaf); if (nsPlay && nsOv && nsGo.keys.length > 1) { delete nsGo.ms; nsRaf = requestAnimationFrame(nsTick); } return nsPanel(); }
       if (t.dataset.ns) { lay.nsw = +t.dataset.ns.slice(1); delete nsErr[lay.wx]; return done(); }
       const [c, on] = t.dataset.set.split(":"), ids = state.stations.filter(s => catOf(s) === c).map(s => s.id);
       lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; if (on === "1") lay.on[c] = true; done();

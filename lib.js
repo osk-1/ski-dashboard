@@ -146,7 +146,7 @@ const strongestGust = (hours, stations, now, h) => stations.reduce((a, s) => {
 // weather-overlay animation: hours between keyframes per window (-24..+48; 0 = Now), keyframes ascending, on the ends grid, nowT always in, max 8 (the far end drops first)
 const nsStep = w => ({ 48: 6, 24: 3, 12: 2 })[Math.abs(w)] || 1;
 const nsKeys = (ends, win, nowT) => { const s = nsStep(win) * 36e5, d = Math.sign(win), have = new Set(ends), out = [];
-  for (let k = 0; k <= Math.abs(win) * 36e5 / s && out.length < 8; k++) if (have.has(nowT + d * k * s)) out.push(nowT + d * k * s); else if (k) break; // a gap ends the run: the range is contiguous
+  for (let k = 0; k <= Math.abs(win) * 36e5 / s && out.length < 8; k++) if (have.has(nowT + d * k * s)) out.push(nowT + d * k * s); else break; // a gap ends the run (the range is contiguous); nowT missing -> []
   return out.sort((a, b) => a - b); };
 const lerp = (a, b, t) => a == null ? b : b == null ? a : a + (b - a) * t;
 if (typeof module !== "undefined") module.exports = { binSum, tierOf, groupByPixel, describeGroup, STEPS, band, hasWind, arrowOn, lambert, esc, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, period, extreme, refroze, staleAfter, offlineAfter, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust, nsKeys, nsStep, lerp };
