@@ -51,7 +51,7 @@ jobs:
             hour=$(TZ=Europe/Vienna date +%H)
             if [ "$hour" -lt 6 ] || [ "$hour" -ge 20 ]; then
               run=false
-            elif curl -fsS --retry 3 "$LIVE/stations.json" -o /tmp/live.json 2>/dev/null; then
+            elif curl -fsS --retry 3 "$LIVE/stations.json?t=$(date +%s)" -o /tmp/live.json 2>/dev/null; then
               python3 - <<'PY' || run=false
           import json, datetime as d, sys, os
           try:
@@ -70,11 +70,11 @@ jobs:
         run: |
           mkdir -p data
           for f in stations danger hourly; do
-            curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json" -o "data/$f.json"
+            curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json?t=$(date +%s)" -o "data/$f.json"
           done
           # optional: health.json is rewritten each run and fetch.py does not read it back, so a missing copy is fine
           for f in health; do
-            curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json" -o "data/$f.json" || rm -f "data/$f.json"
+            curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json?t=$(date +%s)" -o "data/$f.json" || rm -f "data/$f.json"
           done
       - name: Data-loss guard
         if: steps.gate.outputs.run == 'true'
@@ -85,8 +85,6 @@ jobs:
           s = json.load(open("data/stations.json"))
           assert s.get("stations"), "stations.json empty"
           PY
-      - if: steps.gate.outputs.run == 'true'
-        run: python3 fetch.py --selftest
       # on push (code deploy) an upstream outage must not block shipping; the downloaded live data is redeployed
       - if: steps.gate.outputs.run == 'true'
         continue-on-error: ${{ github.event_name == 'push' }}
@@ -95,7 +93,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           mkdir _site
-          cp -r index.html lib.js overlay.js app.js manifest.webmanifest icons data _site/
+          cp -r index.html lib.js overlay.js app.js manifest.webmanifest icons fonts data _site/
       - if: steps.gate.outputs.run == 'true'
         uses: actions/upload-pages-artifact@v5
         with:

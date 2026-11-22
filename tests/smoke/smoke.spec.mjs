@@ -17,12 +17,11 @@ for (const vp of VIEWPORTS) {
       page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
       page.on("pageerror", (e) => problems.push(`exception: ${e.message}`));
 
-      // No live data, no live tiles: fixtures for data/, a blank tile, empty font CSS. The CDN scripts load for real, so their SRI hashes are checked.
+      // No live data, no live tiles: fixtures for data/, a blank tile. The CDN scripts load for real, so their SRI hashes are checked.
       await page.route("**/data/*.json", (route) => route.fulfill({ contentType: "application/json", body: fixture(new URL(route.request().url()).pathname.match(/(\w+)\.json$/)[1]) }));
       await page.route(/^https?:\/\/(?!127\.0\.0\.1|cdnjs\.cloudflare\.com)/, (route) => {
         const url = route.request().url();
         if (url.includes("arcgisonline")) return route.fulfill({ contentType: "image/png", body: PNG });
-        if (url.includes("fonts.googleapis")) return route.fulfill({ contentType: "text/css", body: "" });
         return route.abort();
       });
 

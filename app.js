@@ -241,7 +241,6 @@ document.getElementById("legend").addEventListener("click", e => {
 const CATS = [
   ["snow", "Snow"],
   ["wind", "Wind"],
-  ["weather", "Weather"],
 ];
 const WX = [
   ["new-snow", "New snow"],
@@ -251,7 +250,7 @@ const WX = [
   ["snow-height", "Snow depth"],
 ]; // weather overlays (avalanche.report, one at a time)
 const NSW = [-24, -12, -6, -3, 0, 3, 6, 12, 24, 48]; // animation windows in hours for the hourly overlays (0 = Now, a static frame); new snow keeps its period/until selects
-const catOf = s => (s.type === "wind" || s.type === "weather" ? s.type : "snow");
+const catOf = s => (s.type === "wind" ? "wind" : "snow");
 const DGC = ["#9aa5b1", "#ccff66", "#ffff00", "#ff9900", "#ff0000", "#000"]; // same as .dg0..dg5
 const lay = { on: {}, hide: [], wx: null }; // wx: the weather overlay key or null; hide: station ids, so new stations default to visible
 try {
@@ -266,7 +265,7 @@ try {
   }
 } catch {} // saved data is untrusted; newsnow was the old checkbox
 const vis = s => lay.on[catOf(s)] && !lay.hide.includes(s.id); // dot, label, table row, summary
-const arrowVis = s => arrowOn(s) && s.type !== "wind" && lay.on.wind && !lay.hide.includes(s.id); // small wind arrow above a snow/weather dot
+const arrowVis = s => arrowOn(s) && s.type !== "wind" && lay.on.wind && !lay.hide.includes(s.id); // small wind arrow above a snow dot
 const placed = () => state.stations.filter(s => !misplaced(s)); // a station reported somewhere else is not shown at all
 const shown = () =>
   placed()
@@ -644,51 +643,39 @@ function initMap() {
   map.on("click", () => closeCard());
 }
 
-function renderMap() {
-  const snow = i => (i < 0 ? css("--line") : css(`--snow-${i}`));
-  const lg = document.getElementById("legend");
-  lg.innerHTML =
-    `<span class="ls"><span>Snow<span class="cm"> height</span>:</span>` +
-    ["&lt;10", "10–25", "25–50", "50–100", "100+"]
-      .map((l, i) => `<i style="background:${snow(i)}"></i><span>${l}<span class="cm"> cm</span></span>`)
-      .join("") +
-    `<span class="ph">cm</span></span><button type="button" aria-label="Wind legend" aria-expanded="${lg.classList.contains("open")}">?</button>` +
-    `<span class="sep">·</span><span class="wx"><svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · arrow alone = wind-only station</span>`;
-  if (typeof L === "undefined") {
-    mapDiv.innerHTML = '<div class="empty">Map unavailable.</div>';
-    return;
-  }
-  if (!state.stations.length) return;
-  if (!map) initMap();
-  const focusId = document.activeElement?.dataset?.sid; // rebuilt markers must not drop keyboard focus
-  for (const [k] of CATS) {
-    map[lay.on[k] ? "addLayer" : "removeLayer"](groups[k]);
-    groups[k].clearLayers();
-  }
-  map[lay.on.danger && dangerOk ? "addLayer" : "removeLayer"](dangerLayer);
+const snowCss = i => (i < 0 ? css("--line") : css(`--snow-${i}`));
+const legendHtml = open =>
+  `<span class="ls"><span>Snow<span class="cm"> height</span>:</span>` +
+  ["&lt;10", "10–25", "25–50", "50–100", "100+"]
+    .map((l, i) => `<i style="background:${snowCss(i)}"></i><span>${l}<span class="cm"> cm</span></span>`)
+    .join("") +
+  `<span class="ph">cm</span></span><button type="button" aria-label="Wind legend" aria-expanded="${open}">?</button>` +
+  `<span class="sep">·</span><span class="wx"><svg width="14" height="22" viewBox="-7 -11 14 22">${arrow(0, 0, 180, css("--wind"))}</svg> Wind blows toward, mean km/h · arrow alone = wind-only station</span>`;
+// the weather overlay: cancel a stale animation, drop its pin, load or show the chosen layer
+function syncOverlay() {
   if (nsGo && !(lay.wx && nsC() && nsGo.id === nsCur())) nsStop(); // switching layer, window or period cancels the old loop
   if (!nsOv) {
     nsPin?.remove();
     nsPin = nsAt = null;
   }
   if (lay.wx && !nsErr[lay.wx]) nsC() ? nsShow() : nsBusy[lay.wx] || nsLoad(lay.wx);
-  if (lay.wx && nsC() && !nsErr[lay.wx]) {
-    const u = esc(nsC().units),
-      lbl = lay.wx === "new-snow" ? `${nsName()} (${esc(nsRange().timeRange)} h)` : nsName();
-    lg.insertAdjacentHTML(
-      "beforeend",
-      `<span class="sep">·</span><span class="ls ns"><span>${lbl}:</span>` +
-        nsC()
-          .thresholds.map(
-            ({ range: [lo, hi], color }) =>
-              `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(nsMinus(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi))}<span class="cm"> ${u}</span></span>`,
-          )
-          .join("") +
-        `<span class="ph">${u}</span></span>`,
-    );
-  }
-  // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge at tiers 0–1 (none at tier 2, the highlighted one never), labels follow the zoom tier (#39).
-  // Landmark labels move beside/above/below their symbol to clear dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
+}
+const overlayLegend = () => {
+  const u = esc(nsC().units),
+    lbl = lay.wx === "new-snow" ? `${nsName()} (${esc(nsRange().timeRange)} h)` : nsName();
+  return (
+    `<span class="sep">·</span><span class="ls ns"><span>${lbl}:</span>` +
+    nsC()
+      .thresholds.map(
+        ({ range: [lo, hi], color }) =>
+          `<i${lo == null ? ' class="b"' : ""} style="background:${lo == null ? "transparent" : esc(color)}"></i><span>${esc(nsMinus(lo == null ? "<" + hi : hi == null ? lo + "+" : lo + "–" + hi))}<span class="cm"> ${u}</span></span>`,
+      )
+      .join("") +
+    `<span class="ph">${u}</span></span>`
+  );
+};
+// map pixel geometry shared by the label layout: sizes, zoom tier, tooltip metrics, and the overlap cost of a box against taken boxes and the map controls
+function mapGeometry() {
   const size = map.getSize(),
     at = (lat, lon) => map.latLngToContainerPoint([lat, lon]),
     tier = tierOf(map.getZoom(), fitZ);
@@ -712,6 +699,29 @@ function renderMap() {
     boxes.reduce((c, q) => c + overlap(r, q), 0) +
     10 * ctl.reduce((c, q) => c + overlap(r, q), 0) +
     4 * (area(r) - overlap(r, [0, 0, size.x, size.y])); // outside the map counts extra
+  return { at, tier, tipH, charW, costAgainst };
+}
+
+function renderMap() {
+  const lg = document.getElementById("legend");
+  lg.innerHTML = legendHtml(lg.classList.contains("open"));
+  if (typeof L === "undefined") {
+    mapDiv.innerHTML = '<div class="empty">Map unavailable.</div>';
+    return;
+  }
+  if (!state.stations.length) return;
+  if (!map) initMap();
+  const focusId = document.activeElement?.dataset?.sid; // rebuilt markers must not drop keyboard focus
+  for (const [k] of CATS) {
+    map[lay.on[k] ? "addLayer" : "removeLayer"](groups[k]);
+    groups[k].clearLayers();
+  }
+  map[lay.on.danger && dangerOk ? "addLayer" : "removeLayer"](dangerLayer);
+  syncOverlay();
+  if (lay.wx && nsC() && !nsErr[lay.wx]) lg.insertAdjacentHTML("beforeend", overlayLegend());
+  // Label layout at the current zoom, in container pixels (re-run on every zoomend): stations within 28 px merge at tiers 0–1 (none at tier 2, the highlighted one never), labels follow the zoom tier (#39).
+  // Landmark labels move beside/above/below their symbol to clear dots and arrows; each value tooltip then takes the lowest-overlap spot around its dot.
+  const { at, tier, tipH, charW, costAgainst } = mapGeometry();
   const S = shown(),
     byId = Object.fromEntries(S.map(s => [s.id, s]));
   const grp = groupByPixel(
@@ -808,23 +818,18 @@ function renderMap() {
       { x, y, merged: mg } = g,
       sel = s.id === hl(),
       wo = s.type === "wind",
-      wx = s.type === "weather",
       wind = hasWind(s),
       lg2 = groups[catOf(s)];
-    const bad = s.bad[wo ? "wg" : wx ? "lt" : "hs"];
+    const bad = s.bad[wo ? "wg" : "hs"];
     const val = bad
       ? badText(bad)
       : wo
         ? s.wg == null
           ? "–"
           : Math.round(s.wg) + " km/h"
-        : wx
-          ? s.lt == null
-            ? "–"
-            : s.lt + " °C"
-          : s.hs == null
-            ? "–"
-            : Math.round(s.hs) + " cm";
+        : s.hs == null
+          ? "–"
+          : Math.round(s.hs) + " cm";
     // direction + offset: beside the dot first, then the four diagonals, then below and above
     const spots = [
       ["right", [10, 0]],
@@ -892,7 +897,7 @@ function renderMap() {
           radius: sel ? 12 : 9,
           weight: sel ? 3 : 2,
           color: sel ? css("--fg") : css("--panel"),
-          fillColor: snow(band(s.hs)),
+          fillColor: snowCss(band(s.hs)),
           fillOpacity: 1,
           bubblingMouseEvents: false,
         }).addTo(lg2);
@@ -932,7 +937,7 @@ function renderMap() {
       t = document.createElementNS("http://www.w3.org/2000/svg", "title");
     t.textContent = mg
       ? label
-      : `${s.name} · ${s.alt} m · ${wo ? "wind station" : wx ? "weather station" : val}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
+      : `${s.name} · ${s.alt} m · ${wo ? "wind station" : val}${s.lt != null ? ` · ${s.lt} °C` : ""}${wind ? ` · wind ${Math.round(s.wg)} km/h${s.wg_boe != null ? `, gusts ${Math.round(s.wg_boe)}` : ""}` : ""}`;
     if (wo) el.title = t.textContent;
     else el.append(t); // SVG paths take a <title>, the HTML wind icon a title attribute
     el.setAttribute("tabindex", "0");
@@ -981,7 +986,7 @@ function renderTable() {
     const t = [...new Set(vs.filter(isBad).map(badText))];
     return t.length ? `<span class="why">${esc(t.join("; "))}</span>` : "";
   };
-  const prim = s => (s.type === "wind" ? "wg" : s.type === "weather" ? "lt" : "hs");
+  const prim = s => (s.type === "wind" ? "wg" : "hs");
   const list = placed()
     .filter(vis)
     .map(s => {
@@ -1511,7 +1516,7 @@ function renderSnow(s) {
   charts.snow = null;
   el("snowTitle").textContent = `Snow depth · ${s.name}`;
   const has = hasField(hours, "hs", id);
-  el("snowPanel").hidden = !has && !!state.hourly; // wind-only and weather stations have no snow depth; no hourly file at all: say so
+  el("snowPanel").hidden = !has && !!state.hourly; // wind-only stations have no snow depth; no hourly file at all: say so
   if (!has) {
     if (!state.hourly) {
       el("snowBox").hidden = el("snowNow").hidden = true;

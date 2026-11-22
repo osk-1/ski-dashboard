@@ -23,6 +23,7 @@ To record now: Actions tab → "Record snow data" → Run workflow, tick `force`
 1. Settings → Pages → Source: **GitHub Actions**.
 2. Fine-grained personal access token: repository access only `osk-1/ski-dashboard`, permission Actions: Read and write, with an expiry (note the renewal date).
 3. External scheduler (e.g. cron-job.org, timezone Europe/Vienna) jobs `0 6,7 * * *`, `0,30 8-14 * * *`, `0 15-19 * * *`, each `POST https://api.github.com/repos/osk-1/ski-dashboard/actions/workflows/fetch.yml/dispatches` with headers `Authorization: Bearer <token>`, `Accept: application/vnd.github+json` and body `{"ref":"main"}`.
+   Add a fourth job, weekly, `PUT https://api.github.com/repos/osk-1/ski-dashboard/actions/workflows/fetch.yml/enable` with the same headers (no body). GitHub disables scheduled workflows in public repositories after 60 days without repository activity, and data commits are not made, so a quiet summer counts; this job keeps the workflow enabled. Put the token's expiry date in a calendar too.
 
 ## Stations
 
@@ -65,7 +66,7 @@ from, or named differently than, its entry in `REFERENCE` (or has none). Jump, s
 ## Run locally
 
 ```bash
-python3 fetch.py --selftest
+python3 -m unittest discover tests
 python3 fetch.py
 ```
 
