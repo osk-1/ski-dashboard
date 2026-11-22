@@ -118,7 +118,7 @@ for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phon
 lay.nsh ??= 24; lay.nsw ??= 0; // the weather overlay is off by default: it fetches extra images
 // Weather overlay (avalanche.report): config per key, loaded on first selection; nsEnd = selected period end (ms, UTC; hourly overlays: now); nsImg caches url -> reprojected data URL
 // nsGo: the shown (or loading) selection: keyframes, their frames, the fade position; nsOv: its overlays A (+ B while fading); nsAt: the clicked spot and its value per keyframe
-const nsCfg = {}, nsErr = {}, nsBusy = {}, nsImg = {}; let nsEnd, nsOv, nsPin, nsGo, nsRaf, nsAt, nsPlay = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+const nsCfg = {}, nsErr = {}, nsBusy = {}, nsImg = {}; let nsEnd, nsOv, nsPin, nsGo, nsRaf, nsAt, nsRm = matchMedia("(prefers-reduced-motion: reduce)"), nsPlay = !nsRm.matches;
 const nsC = () => nsCfg[lay.wx], nsName = () => WX.find(w => w[0] === lay.wx)[1], nsMinus = v => String(v).replaceAll("-", "−");
 const nsDec = (k, r) => k === "temp" ? (r - 120) / 2 : r; // PNG red channel -> value (temp: °C = (R − 120) / 2)
 const NS_ATTR = 'Weather model: <a href="https://avalanche.report" target="_blank" rel="noopener">GeoSphere Austria via avalanche.report</a>';
@@ -191,11 +191,13 @@ function nsTip() { // the pin's value at the current fade position; a keyframe w
   else if (nsPin.txt !== txt) nsPin.setTooltipContent(txt);
   nsPin.txt = txt;
 }
+function nsSetPlay(on) { nsPlay = on; cancelAnimationFrame(nsRaf); if (on && nsOv && nsGo.keys.length > 1) { delete nsGo.ms; nsRaf = requestAnimationFrame(nsTick); } nsPanel(); }
+nsRm.addEventListener("change", () => nsSetPlay(!nsRm.matches)); // the OS setting can change while the page is open
 const nsOvl = (src, o) => L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: o, interactive: false, attribution: NS_ATTR });
 // nsImg is keyed by url in load order: keep the newest NS_KEEP entries (a +48 selection is 9 images + 9 value PNGs) and always the shown selection
-const NS_KEEP = 30, nsUrls = g => g.keys.flatMap(T => [nsUrl(nsRange().imageOverlayURL, T), nsUrl(nsRange().dataOverlayURL, T)]);
+const NS_KEEP = 30, nsUrls = g => g.keys.flatMap(T => [nsUrl(nsRange().imageOverlayURL, T), ...nsRange().dataOverlayURL ? [nsUrl(nsRange().dataOverlayURL, T)] : []]);
 function nsTrim(g) { const ks = Object.keys(nsImg), keep = nsUrls(g); for (const u of ks.slice(0, Math.max(0, ks.length - NS_KEEP))) if (!keep.includes(u)) delete nsImg[u]; }
-const nsStop = () => { cancelAnimationFrame(nsRaf); nsOv?.remove(); nsOv = nsGo = null; };
+const nsStop = () => { cancelAnimationFrame(nsRaf); nsOv?.remove(); nsOv = nsGo = null; if (!lay.wx) for (const u in nsImg) delete nsImg[u]; }; // overlay switched off: free its images
 const nsOpen = (g, i) => { g.a = i; nsOv = L.layerGroup([g.A = nsOvl(g.fr[i], .55)]).addTo(map); if (g.keys.length > 1) nsRaf = requestAnimationFrame(nsTick); }; // first frame on the map
 function nsShow() {
   if (nsGo) return; // shown or loading (renderMap stops any other selection)
@@ -208,11 +210,13 @@ function nsShow() {
   nsTrim(g);
 }
 function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); one loop of the window takes ~7 s
-  const g = nsGo, n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = nsPlay && requestAnimationFrame(nsTick); // paused: draw this frame, then stop (play restarts the loop)
+  const g = nsGo; if (nsPlay && g.ms != null && ms - g.ms < 32) { nsRaf = requestAnimationFrame(nsTick); return; } // ~30 fps is enough for a slow fade and halves the repaints
+  const n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = nsPlay && requestAnimationFrame(nsTick); // paused: draw this frame, then stop (play restarts the loop)
   let b = g.a; do b = (b + 1) % n; while (g.fr[b] === false && b !== g.a); // a failed keyframe is skipped
   if (b === g.a) { nsRaf = 0; return; } // one good frame only (the others failed): nothing to animate, stop the loop
   if (!g.fr[b]) return; // the next one is still loading
   if (g.b !== b) { g.b = b; g.B ? g.B.setUrl(g.fr[b]) : nsOv.addLayer(g.B = nsOvl(g.fr[b], 0)); }
+  if (!g.B.getElement().complete) return; // the new frame is still decoding: keep the current one, do not fade to blank
   if (nsPlay) g.t += dt * n / 7000;
   if (g.t >= 1) { [g.A, g.B] = [g.B, g.A]; g.a = b; g.b = -1; g.t = 0; }
   g.A.setOpacity(.55 * (1 - g.t)); g.B.setOpacity(.55 * g.t); nsTip();
@@ -313,7 +317,7 @@ function initMap() {
     p.addEventListener("click", e => {
       const w = e.target.closest("input[data-wx]"); if (w?.dataset.wx && w.dataset.wx === lay.wx && nsErr[lay.wx]) { delete nsErr[lay.wx]; return done(); } // clicking the selected, failed overlay again retries (no change event fires)
       const t = e.target.closest("button"); if (!t || t.ariaDisabled) return; // aria-disabled buttons stay focusable and keep their hint
-      if (t.dataset.ns === "p") { nsPlay = !nsPlay; cancelAnimationFrame(nsRaf); if (nsPlay && nsOv && nsGo.keys.length > 1) { delete nsGo.ms; nsRaf = requestAnimationFrame(nsTick); } return nsPanel(); }
+      if (t.dataset.ns === "p") return nsSetPlay(!nsPlay);
       if (t.dataset.ns) { lay.nsw = +t.dataset.ns.slice(1); delete nsErr[lay.wx]; return done(); }
       const [c, on] = t.dataset.set.split(":"), ids = state.stations.filter(s => catOf(s) === c).map(s => s.id);
       lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; if (on === "1") lay.on[c] = true; done();

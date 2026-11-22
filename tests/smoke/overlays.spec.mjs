@@ -301,3 +301,16 @@ test("the image cache is trimmed to the newest entries plus the shown selection"
   expect(n).toBeLessThanOrEqual(30 + 14); // newest 30 + the selection's own urls
   expect(await page.evaluate(() => Object.keys(nsImg).includes("x0"))).toBe(false);
 });
+
+test("switching the overlay off drops its images from the cache", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  const urls = () => page.evaluate(() => Object.keys(nsImg));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await seen(page, 2);
+  expect((await urls()).length).toBeGreaterThan(1);
+  await radio(page, "None").check();
+  await expect.poll(urls).toEqual([]);
+  expect(problems).toEqual([]);
+});
