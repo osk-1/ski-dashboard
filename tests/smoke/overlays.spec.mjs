@@ -1,4 +1,4 @@
-/* global map, L, document, window, Image, nsImg, nsRaf, nsGo, nsTrim, requestAnimationFrame -- page globals inside page.evaluate */
+/* global map, L, document, window, Image, nsImg, nsRaf, nsGo, nsTrim, nsPin, requestAnimationFrame -- page globals inside page.evaluate */
 import { deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import { DESKTOP, open, VIEWPORTS } from "./helpers.mjs";
@@ -288,7 +288,22 @@ test("one good frame: the animation loop stops instead of spinning", async ({ br
   await page.locator('#lp [data-ns="w6"]').click();
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => !nsRaf), { timeout: 15000 }).toBe(true);
+  // nsRaf = 0 alone is not enough: no tick may still be scheduled (count requestAnimationFrame calls for 0.5 s)
+  const ticks = await page.evaluate(() => new Promise((ok) => { const raf = window.requestAnimationFrame; let n = 0; window.requestAnimationFrame = (f) => (n++, raf(f)); setTimeout(() => { window.requestAnimationFrame = raf; ok(n); }, 500); }));
+  expect(ticks).toBe(0);
   await expect(page.locator('#lp [data-n="temp"]')).toHaveText("");
+});
+
+test("a layer without value PNGs ignores map clicks", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  const c = structuredClone(CFG.temp); delete c.timeRanges[0].dataOverlayURL;
+  await page.route(`${BASE}/temp/config.json`, (r) => r.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(c) }));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  await click(page, 47.13, 10.26);
+  expect(await page.evaluate(() => nsPin)).toBeNull(); // no pin, and no exception (problems)
+  expect(problems).toEqual([]);
 });
 
 test("the image cache is trimmed to the newest entries plus the shown selection", async ({ browser }) => {
