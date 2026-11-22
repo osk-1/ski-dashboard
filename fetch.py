@@ -115,8 +115,8 @@ def get_json(url):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
                 return json.load(r)
-        except (OSError, http.client.HTTPException):
-            if attempt == 2:
+        except (OSError, http.client.HTTPException) as e:
+            if attempt == 2 or (isinstance(e, urllib.error.HTTPError) and e.code < 500):  # a 404 will not change in 2 s
                 raise
             time.sleep(2)
 

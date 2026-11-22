@@ -439,6 +439,14 @@ def selftest():
         except OSError:
             pass
         assert uo.call_count == 2, uo.call_count
+    # a 404 is not retried
+    nf404 = urllib.error.HTTPError("https://example.invalid/x", 404, "nf", None, None)
+    with mock.patch.object(fetch.time, "sleep"), mock.patch.object(fetch.urllib.request, "urlopen", side_effect=nf404) as uo:
+        try:
+            fetch.get_json("https://example.invalid/x")
+        except urllib.error.HTTPError:
+            pass
+        assert uo.call_count == 1, uo.call_count
     # should_run(): Vienna window 06:00-19:59 (winter, UTC+1), then live-data age vs max_age_min
     stale = "2026-11-22T00:00:00+00:00"
     assert not should_run(datetime(2026, 11, 23, 5, 59, tzinfo=TZ), stale, 20)
