@@ -588,6 +588,73 @@ def should_run(now, live_updated, max_age_min):
         return True
 
 
+def merge_history(hours, tried, live, stations, by_uuid, now, src, note):
+    """Fill hours in place: Tirol archive backfill (adds to tried), the live hour, TAWES history and Vorarlberg history.
+    Partial trouble is recorded on src (health.json) through note."""
+    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now, tried), time.monotonic()
+    todo = backfill(miss)  # Tirol archive: only hours not yet recorded, capped so a slow archive can't time out the job
+    for i, t in enumerate(todo):
+        if time.monotonic() - t0 > BACKFILL_SECONDS:
+            todo = todo[:i]
+            break
+        try:
+            for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
+                hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
+            tried.add(t.strftime(UTC_KEY))
+        except Exception as e:
+            print("skip hour", t.isoformat(), e, file=sys.stderr)
+            bad += 1
+    if bad:
+        note("tirol", f"archive hours failed: {bad}")
+    if len(miss) > len(todo):
+        note("tirol", f"backfill: {len(miss) - len(todo)} hours left for later runs")
+    try:
+        for k, maps in tirol_hours(live, by_uuid).items():
+            hmerge(hours, k, maps, keep=True)
+    except Exception as e:
+        print("live hour failed:", e, file=sys.stderr)
+        note("tirol", f"live hour failed: {e}")
+    try:  # TAWES hours, one historical request
+        u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        start = now - timedelta(days=HOURLY_DAYS, hours=1)  # whole window each run, so TAWES gaps heal on their own
+        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=TL,RF,RR,SCHNEE,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(start)}&end={u(now)}")
+        for k, maps in tawes_hourly(gj).items():
+            hmerge(hours, k, maps)
+    except Exception as e:
+        print("TAWES history failed:", e, file=sys.stderr)
+        src["tawes"]["detail"] = f"history failed: {e}"
+    for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
+        if st["id"].startswith("VOR-"):
+            try:
+                req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    txt = gzip.decompress(r.read()).decode()
+                for k, vals in smet_hourly(smet_table(txt)).items():
+                    hmerge(hours, k, {f: {st["id"]: v} for f, v in vals.items()})
+            except Exception as e:
+                print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
+                note("vorarlberg", f"history failed: {st['id']} {e}")
+
+
+def read_bulletins(ids, src, fail):
+    """Danger regions for ids: last run's regions kept, each bulletin that loads replaces its own. Failures go to src/fail."""
+    try:  # a bulletin that fails keeps its regions from the last run
+        with open("data/danger.json") as fh:
+            regions = {k: v for k, v in json.load(fh)["regions"].items() if k in ids}
+    except (FileNotFoundError, KeyError, ValueError):
+        regions = {}
+    for name, url in BULLETINS.items():  # secondary sources: a failure must not abort the run
+        try:
+            regions.update(parse_danger(get_json(url), ids))
+        except Exception as e:
+            print("avalanche bulletin failed:", name, e, file=sys.stderr)
+            if preseason(name, e):
+                src["bulletins"]["detail"] = "no bulletin published yet"
+                continue
+            fail("bulletins", "; ".join(filter(None, [src["bulletins"]["error"], f"{name}: {e}"])))
+    return regions
+
+
 def main():
     now = datetime.now(TZ)
     src = {k: {"ok": True, "error": None, "detail": None} for k in ("tirol", "tawes", "vorarlberg", "model", "bulletins")}  # health.json
@@ -635,49 +702,7 @@ def main():
         hourly = {"model": {"source": None, "issued": None}, "hours": {}}
         hours = hourly["hours"]
     tried = set(hourly.get("tried", []))
-    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now, tried), time.monotonic()
-    todo = backfill(miss)  # Tirol archive: only hours not yet recorded, capped so a slow archive can't time out the job
-    for i, t in enumerate(todo):
-        if time.monotonic() - t0 > BACKFILL_SECONDS:
-            todo = todo[:i]
-            break
-        try:
-            for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
-                hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
-            tried.add(t.strftime(UTC_KEY))
-        except Exception as e:
-            print("skip hour", t.isoformat(), e, file=sys.stderr)
-            bad += 1
-    if bad:
-        note("tirol", f"archive hours failed: {bad}")
-    if len(miss) > len(todo):
-        note("tirol", f"backfill: {len(miss) - len(todo)} hours left for later runs")
-    try:
-        for k, maps in tirol_hours(live, by_uuid).items():
-            hmerge(hours, k, maps, keep=True)
-    except Exception as e:
-        print("live hour failed:", e, file=sys.stderr)
-        note("tirol", f"live hour failed: {e}")
-    try:  # TAWES hours, one historical request
-        u = lambda x: x.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M")
-        start = now - timedelta(days=HOURLY_DAYS, hours=1)  # whole window each run, so TAWES gaps heal on their own
-        gj = get_json(GEO + "historical/tawes-v1-10min?parameters=TL,RF,RR,SCHNEE,FF,FFX,DD&station_ids=" + ",".join(TAWES) + f"&start={u(start)}&end={u(now)}")
-        for k, maps in tawes_hourly(gj).items():
-            hmerge(hours, k, maps)
-    except Exception as e:
-        print("TAWES history failed:", e, file=sys.stderr)
-        src["tawes"]["detail"] = f"history failed: {e}"
-    for st in stations:  # Vorarlberg history: last 7 days of 5-min values per station
-        if st["id"].startswith("VOR-"):
-            try:
-                req = urllib.request.Request(VOR + "woche/" + st["id"][4:] + ".smet.gz", headers=UA)
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    txt = gzip.decompress(r.read()).decode()
-                for k, vals in smet_hourly(smet_table(txt)).items():
-                    hmerge(hours, k, {f: {st["id"]: v} for f, v in vals.items()})
-            except Exception as e:
-                print("Vorarlberg history failed:", st["id"], e, file=sys.stderr)
-                note("vorarlberg", f"history failed: {st['id']} {e}")
+    merge_history(hours, tried, live, stations, by_uuid, now, src, note)
     for st in stations:
         st["flags"] = check(st, hours, now)
     out = {
@@ -701,20 +726,7 @@ def main():
     hour_flags(hourly["hours"])
     out["data/hourly.json"] = json.dumps(hourly, sort_keys=True, separators=(",", ":"))
     ids = {s["region"].split()[0] for s in stations if s.get("region")}
-    try:  # a bulletin that fails keeps its regions from the last run
-        with open("data/danger.json") as fh:
-            regions = {k: v for k, v in json.load(fh)["regions"].items() if k in ids}
-    except (FileNotFoundError, KeyError, ValueError):
-        regions = {}
-    for name, url in BULLETINS.items():  # secondary sources: a failure must not abort the run
-        try:
-            regions.update(parse_danger(get_json(url), ids))
-        except Exception as e:
-            print("avalanche bulletin failed:", name, e, file=sys.stderr)
-            if preseason(name, e):
-                src["bulletins"]["detail"] = "no bulletin published yet"
-                continue
-            fail("bulletins", "; ".join(filter(None, [src["bulletins"]["error"], f"{name}: {e}"])))
+    regions = read_bulletins(ids, src, fail)
     if regions:
         out["data/danger.json"] = json.dumps({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")})
     health = {

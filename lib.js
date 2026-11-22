@@ -174,7 +174,8 @@ const refreshStale = (lastIso, now) => {
   if (h >= 7 && h < 20) return now - last > 75 * 60e3;
   return last < keyMs((h >= 20 ? k.slice(0, 10) : shift(k.slice(0, 10), -1)) + "T19");
 };
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const esc = s =>
+  String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 // Map zoom tiers (#39): 0 = overview, 1 = values, 2 = names + everything
 const tierOf = (z, fitZ) => (z < fitZ + 1 ? 0 : z < fitZ + 2 ? 1 : 2);
 // Greedy pixel grouping: highest rank seeds a group and absorbs unassigned points within px; `keep` stays alone. pts: [{id, x, y, rank}]

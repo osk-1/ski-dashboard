@@ -7,6 +7,7 @@ test("band: cm thresholds", () => {
   assert.deepEqual([0, 9.9, 10, 25, 50, 100, 250].map(band), [0, 0, 1, 2, 3, 4, 4]);
 });
 test("esc escapes html", () => assert.equal(esc(`<a href="x">&`), "&lt;a href=&quot;x&quot;&gt;&amp;"));
+test("esc escapes apostrophe", () => assert.equal(esc("a'b"), "a&#39;b"));
 test("wind helpers", () => {
   assert.equal(hasWind({ wr: 0, wg: 0 }), true);
   assert.equal(hasWind({ wr: null, wg: 3 }), false);
