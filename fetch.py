@@ -552,10 +552,17 @@ def forecast(stations, fetch=get_json):
         print("Open-Meteo response not understood (parser broken?), falling back to MET Norway:", repr(e), file=sys.stderr)
         perr = f"Open-Meteo response not understood: {e!r}"
         down = None
-    model = {}
+    model, failed = {}, []
     for s in stations:
-        r = fetch(f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={s['lat']:.4f}&lon={s['lon']:.4f}&altitude={s['alt']}")
-        merge_model(model, metno_hourly(r["properties"]["timeseries"], [s["id"]]))
+        try:
+            r = fetch(f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={s['lat']:.4f}&lon={s['lon']:.4f}&altitude={s['alt']}")
+            merge_model(model, metno_hourly(r["properties"]["timeseries"], [s["id"]]))
+        except Exception as e:  # one station must not cost the others their data
+            print("MET Norway failed:", s["id"], e, file=sys.stderr)
+            failed.append(s["id"])
+    if failed:
+        msg = "MET Norway failed for: " + ", ".join(failed)
+        down = msg if down is None else f"{down}; {msg}"
     return model, "MET Norway", down, perr
 
 
@@ -571,6 +578,8 @@ def main():
 
     live = get_json(LWD + "stations.geojson")["features"]  # primary source: a failure aborts the run
     stations = [station(f) for f in live if (f["properties"].get("LWD-Nummer") or f["id"]) in STATIONS]
+    if not stations:
+        raise RuntimeError("no Tirol stations in feed")
     if gone := sorted(set(STATIONS) - {x["id"] for x in stations}):
         print("station missing from feed:", *gone, file=sys.stderr)
         src["tirol"]["detail"] = "missing from feed: " + ", ".join(gone)
@@ -1075,6 +1084,19 @@ def selftest():
         assert fmodel["2026-11-19T12"]["mt"] == {"A": 3.0} and fmodel["2026-11-19T12"]["sd"] == {}, fmodel
         assert log in err.getvalue(), err.getvalue()
         assert ("response not understood" in err.getvalue()) == (want is not None)
+
+    # forecast(): a station whose MET fetch raises is named in the warning; the other station's data is kept
+    def met_b_fails(url):
+        if "open-meteo" in url:
+            raise urllib.error.URLError("down")
+        if "lat=47.2000" in url:
+            raise OSError("boom")
+        return {"properties": {"timeseries": ts}}
+
+    with contextlib.redirect_stderr(io.StringIO()) as err:
+        fmodel, source, warning, perr = forecast(stn + [{"id": "B", "lat": 47.2, "lon": 10.3, "alt": 1500}], met_b_fails)
+    assert source == "MET Norway" and perr is None and fmodel["2026-11-19T12"]["mt"] == {"A": 3.0}, fmodel
+    assert warning.endswith("; MET Norway failed for: B") and "MET Norway failed: B boom" in err.getvalue(), (warning, err.getvalue())
     print("selftest ok")
 
 
