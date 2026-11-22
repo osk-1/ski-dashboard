@@ -81,12 +81,14 @@ h2 { font: 600 1.15rem/1.2 var(--display); margin: 0 0 10px; letter-spacing: .02
 #map .lp .gh button { min-height: 28px; padding: 0 8px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
 #map .lp .ns label { padding-left: 24px; } #map .lp .ns label > span { width: 3.2em; color: var(--muted); }
 #map .lp fieldset { min-width: 0; margin: 6px 0 0; padding: 4px 0 0; border: 0; border-top: 1px solid var(--line); } #map .lp legend { padding: 0 6px 0 0; font: 600 .8rem/1 var(--display); text-transform: uppercase; letter-spacing: .04em; }
+#map .lp .nsw { flex-wrap: wrap; margin: 4px 0 0 24px; } #map .lp .nsw button { flex: 1 0 20%; min-height: 28px; } #map .lp .nsw button:nth-child(n+6) { border-top: 1px solid var(--line); } #map .lp .nsw button:nth-child(6) { border-left: 0; } #map .lp .nsw button:disabled { opacity: .4; cursor: default; }
+#map .lp .nsp { display: flex; align-items: center; gap: 8px; margin: 4px 0 0 24px; } #map .lp .nsp button { min-width: 34px; min-height: 28px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
 #map .lp select { flex: 1; min-width: 0; height: 28px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
 #map .lp :focus-visible, #map .lay > .leaflet-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 820px), (max-height: 500px) and (orientation: landscape) {
   #map .lay > .leaflet-bar button { width: 44px; height: 44px; line-height: 42px; }
   #map .lp label, #map .lp .gh button { min-height: 44px; } #map .lp input { width: 22px; height: 22px; }
-  #map .lp select { height: 44px; } .legend .ls.ns { flex-basis: 100%; } .legend .ls.ns i { flex: none; } /* own scrolling row; 9 swatches would otherwise shrink to nothing */
+  #map .lp select, #map .lp .nsw button, #map .lp .nsp button { height: 44px; } .legend .ls.ns { flex-basis: 100%; } .legend .ls.ns i { flex: none; } /* own scrolling row; 9 swatches would otherwise shrink to nothing */
 }
 #map .pl { position: absolute; left: -4px; top: -9px; display: flex; align-items: center; gap: 5px; white-space: nowrap; font: 600 .8rem/1 var(--body); color: var(--village); text-shadow: 0 0 3px var(--land), 0 0 3px var(--land), 0 0 3px var(--land); }
 #map .pl i { width: 8px; height: 8px; background: var(--village); }

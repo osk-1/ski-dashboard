@@ -54,7 +54,9 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator("#legend .ls.ns")).toContainText("−10–−5"); // ...in both numbers
   await expect(page.locator("#legend .ls.ns")).toContainText("°C");
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(0); // hourly: no period
-  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Past"] option')).toHaveCount(25); // now and 24 h back, not 7 days
+  await expect(page.locator('#lp [data-ns="t"]')).toHaveCount(0); // hourly: window buttons, no until
+  await expect(page.locator('#lp [data-ns="w-24"]')).toBeEnabled(); // 24 h back...
+  await expect(page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true"); // ...Now by default
   await radio(page, "Wind").check();
   await expect(page.locator('#lp input[name="wx"]:checked')).toHaveCount(1);
   await expect(radio(page, "Wind")).toBeChecked();
@@ -64,7 +66,8 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(1);
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await radio(page, "Snow depth").check();
-  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Forecast"]')).toHaveCount(0); // analysis only
+  await expect(page.locator('#lp [data-ns="w3"]')).toBeDisabled(); // analysis only
+  await expect(page.locator('#lp [data-ns="w-3"]')).toBeEnabled();
   // the danger checkbox is independent of the radio group
   const danger = page.locator("#lp label", { hasText: "Avalanche danger" }).locator("input");
   const was = await danger.isChecked();
