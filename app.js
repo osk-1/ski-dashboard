@@ -566,6 +566,7 @@ function renderCharts() {
 
 const fmtHour = (t, day) => new Date(t).toLocaleString("en-GB", { ...(day ? { weekday: "short", day: "numeric" } : { hour: "2-digit", minute: "2-digit" }), timeZone: "Europe/Vienna" });
 const srcOf = id => id.startsWith("TAWES-") ? "GeoSphere Austria" : id.startsWith("VOR-") ? "LWD Vorarlberg" : "LWD Tirol";
+const isGauge = id => /^(TAWES|VOR)-/.test(id);
 
 const legend = { labels: { boxWidth: 14, boxHeight: 8, font: { size: 11 } } };
 const hasField = (hours, f, id) => Object.values(hours).some(h => h[f]?.[id] != null);
@@ -632,7 +633,7 @@ function renderCond(s) {
   el("condTitle").textContent = `Conditions · ${s.name}`;
   charts.cond?.destroy(); charts.cond = null;
   const any = f => hasField(hours, f, id);
-  const gauge = /^(TAWES|VOR)-/.test(id), pf = gauge ? "pr" : "hr", hasOft = any("oft");
+  const gauge = isGauge(id), pf = gauge ? "pr" : "hr", hasOft = any("oft");
   const lines = [["lt", "Air", "°C"], ...(hasOft ? [["oft", "Snow surface", "°C"]] : []), ["rh", "Humidity", "%"], [pf, gauge ? "Precipitation" : "Snow depth rise", gauge ? "mm" : "cm"]];
   const has = Object.values(hours).some(h => Object.entries(h).some(([f, m]) => f !== "flags" && m[id] != null));
   el("condBox").hidden = el("condNow").hidden = el("condWin").parentNode.hidden = !has;
@@ -691,7 +692,7 @@ function renderSnow(s) {
   const has = hasField(hours, "hs", id);
   el("snowPanel").hidden = !has && !!state.hourly; // wind-only and weather stations have no snow depth; no hourly file at all: say so
   if (!has) { if (!state.hourly) { el("snowBox").hidden = el("snowNow").hidden = true; el("snowNote").textContent = NO_HOURLY; } return; }
-  const now = anchorMs(hours, Date.now()), gauge = /^(TAWES|VOR)-/.test(id);
+  const now = anchorMs(hours, Date.now()), gauge = isGauge(id);
   el("snowBox").hidden = h === 1; el("snowNow").hidden = h !== 1;
   if (h === 1) {
     const dh = delta(hours, "hs", id, now, 1), nx = (f, name, u) => nextCard(hours, id, now, f, name, u);
@@ -733,7 +734,7 @@ function renderWind(s) {
   const has = hasField(hours, "wg", id);
   el("windPanel").hidden = !has && !!state.hourly;
   if (!has) { if (!state.hourly) { el("windBox").hidden = el("windNow").hidden = true; el("windNote").textContent = NO_HOURLY; } return; }
-  const now = anchorMs(hours, Date.now()), gauge = /^(TAWES|VOR)-/.test(id);
+  const now = anchorMs(hours, Date.now()), gauge = isGauge(id);
   el("windBox").hidden = h === 1; el("windNow").hidden = h !== 1;
   if (h === 1) {
     const dg = delta(hours, "wg_boe", id, now, 1), v = latest(hours, "wg_boe", id, now), nx = (f, name, u) => nextCard(hours, id, now, f, name, u);
