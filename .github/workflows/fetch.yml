@@ -59,11 +59,12 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           mkdir -p data
-          for f in stations danger hourly; do
+          for f in stations hourly; do
             curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json?t=$(date +%s)" -o "data/$f.json"
           done
-          # optional: health.json is rewritten each run and fetch.py does not read it back, so a missing copy is fine
-          for f in health; do
+          # optional: health.json is rewritten each run and fetch.py does not read it back, so a missing copy is fine;
+          # danger.json is optional too: fetch.py starts it empty if missing and it is only written once a bulletin has loaded, so requiring it could lock the pipeline out
+          for f in health danger; do
             curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json?t=$(date +%s)" -o "data/$f.json" || rm -f "data/$f.json"
           done
       - name: Data-loss guard

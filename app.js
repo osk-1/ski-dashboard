@@ -2014,8 +2014,9 @@ load();
 // accuracy is judged against the clock: re-check every minute (charts keep their state); a visible tab refetches after 30 min, since it never gets a visibilitychange (lastLoad 0 = failed first load, so it retries each minute, same as visibilitychange)
 setInterval(() => {
   if (document.visibilityState === "visible" && Date.now() - lastLoad > 30 * 60e3) load();
-  if (state.stations.length && accSig() !== lastSig) {
-    lastSig = accSig();
+  const sig = state.stations.length ? accSig() : null;
+  if (sig && sig !== lastSig) {
+    lastSig = sig;
     renderBanner();
     renderSummary();
     renderMap();
