@@ -1,4 +1,4 @@
-/* global map, L, document, window, Image, nsImg, requestAnimationFrame -- page globals inside page.evaluate */
+/* global map, L, document, window, Image, nsImg, nsRaf, nsGo, nsTrim, requestAnimationFrame -- page globals inside page.evaluate */
 import { deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import { DESKTOP, open, VIEWPORTS } from "./helpers.mjs";
@@ -226,6 +226,9 @@ test("reduced motion starts paused", async ({ browser }) => {
   const before = await ops(page);
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
   expect(await ops(page)).toEqual(before);
+  await expect(page.locator("#lp .nsp small")).toContainText("paused");
+  await click(page, 47.13, 10.26); // paused: the map shows the end the button names (+6 h = 02:00 Vienna), not Now
+  await expect(pin(page)).toContainText("Sun 02:00", { timeout: 15000 });
   await page.locator('#lp [data-ns="p"]').click(); // play works
   await expect(page.locator('#lp [data-ns="p"]')).toHaveAttribute("aria-label", "Pause");
   await seen(page, 2);
@@ -264,4 +267,37 @@ test("saved window is restored, a bad one falls back to Now", async ({ browser }
   o = await open(browser, DESKTOP, "light", { desktop: true, setup: setup(), storage: { layers: JSON.stringify({ wx: "temp", nsw: 7 }) } });
   await openPanel(o.page);
   await expect(o.page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a failing value PNG shows – on the pin, not the other hour's value", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await page.route(`${BASE}/temp/**/*.png`, (r) => r.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "" }));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer").first()).toBeAttached();
+  await click(page, 47.13, 10.26);
+  await expect(pin(page)).toContainText("–", { timeout: 15000 });
+});
+
+test("one good frame: the animation loop stops instead of spinning", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await page.route(`${BASE}/temp/**/*.gif`, (r) => /_19-00_/.test(r.request().url()) ? r.fallback() : r.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "" }));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => !nsRaf), { timeout: 15000 }).toBe(true);
+  await expect(page.locator('#lp [data-n="temp"]')).toHaveText("");
+});
+
+test("the image cache is trimmed to the newest entries plus the shown selection", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer").first()).toBeAttached();
+  const n = await page.evaluate(() => { for (let i = 0; i < 60; i++) nsImg["x" + i] = 1; nsTrim(nsGo); return Object.keys(nsImg).length; });
+  expect(n).toBeLessThanOrEqual(30 + 14); // newest 30 + the selection's own urls
+  expect(await page.evaluate(() => Object.keys(nsImg).includes("x0"))).toBe(false);
 });

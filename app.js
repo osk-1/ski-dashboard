@@ -142,7 +142,7 @@ function nsPanel() {
   if (!lay.wx || !nsC()) { x.innerHTML = ""; return; }
   const ma = Date.parse(nsRange().maxAnalysisTimestamp), ends = nsEnds(), opt = t => `<option value="${t}"${t === nsEnd ? " selected" : ""}>${esc(fmtSlot(t))}</option>`, on = nsKf().length > 1 ? lay.nsw : 0;
   if (lay.wx !== "new-snow") x.innerHTML = `<div class="seg nsw" role="group" aria-label="Time window">${NSW.map(w => `<button type="button" data-ns="w${w}" aria-pressed="${w === on}"${w && nsKeys(ends, w, nsEnd).length < 2 ? ` aria-disabled="true" title="${w > 0 ? "No forecast for this layer" : "No data this far back"}"` : ""}>${w ? nsMinus((w > 0 ? "+" : "") + w) : "Now"}</button>`).join("")}</div>` + (nsKeys(ends, 3, nsEnd).length < 2 ? `<small class="nsn">No forecast for this layer</small>` : "") + // the hint must reach touch screens and screen readers too
-    (on ? `<div class="nsp"><button type="button" data-ns="p" aria-label="${nsPlay ? "Pause" : "Play"}">${nsPlay ? "❚❚" : "▶"}</button><small>every ${nsStep(on)} h</small></div>` : "");
+    (on ? `<div class="nsp"><button type="button" data-ns="p" aria-label="${nsPlay ? "Pause" : "Play"}">${nsPlay ? "❚❚" : "▶"}</button><small>every ${nsStep(on)} h${nsPlay ? "" : " · paused"}</small></div>` : "");
   else x.innerHTML = (nsC().timeRanges.length > 1 ? `<label><span>Period</span><select data-ns="h">${nsC().timeRanges.map(r => `<option value="${esc(r.timeRange)}"${r === nsRange() ? " selected" : ""}>${esc(r.timeRange)} h</option>`).join("")}</select></label>` : "") +
     `<label><span>Until</span><select data-ns="t">${[["Forecast", t => t > ma], ["Past", t => t <= ma]].map(([l, f]) => ends.some(f) ? `<optgroup label="${l}">${ends.filter(f).map(opt).join("")}</optgroup>` : "").join("")}</select></label>`;
   if (f) x.querySelector(`[data-ns="${f}"]`)?.focus();
@@ -179,9 +179,10 @@ function nsClick(e) { // value of the weather PNGs under the click, as a pin wit
   nsGo.keys.forEach((T, i) => { const url = nsUrl(tpl, T);
     (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (nsAt !== p) return; // clicked elsewhere, or the selection moved on while this loaded
       const [col, row] = nsPix(p.ll.lat, p.ll.lng, W, H, cfg); p.v[i] = col >= 0 && col < W && row >= 0 && row < H ? nsDec(k, d[row * W + col]) : NaN; nsTip(); },
-    () => { delete nsImg[url]; }); });
+    () => { delete nsImg[url]; if (nsAt === p) { p.v[i] = NaN; nsTip(); } }); }); // no data for that hour: the pin says so instead of showing the other hour's value
+  nsTrim(nsGo);
 }
-function nsTip() { // the pin's value at the current fade position; a keyframe whose PNG has not loaded yet gives way to the other
+function nsTip() { // the pin's value at the current fade position; a keyframe whose PNG is still loading gives way to the other; a failed one shows –
   const g = nsGo, p = nsAt, b = g?.B ? g.b : -1; if (!p || p.g !== g) return;
   const v = lerp(p.v[g.a], b < 0 ? null : p.v[b], g.t), k = lay.wx; if (v == null) return;
   const txt = `<b>${Number.isNaN(v) ? "–" : `${k === "new-snow" ? "+" : ""}${nsMinus(Math.round(v * 10) / 10)} ${esc(nsC().units)}${k === "new-snow" ? ` (${esc(nsRange().timeRange)} h)` : ""}`}</b>` +
@@ -191,20 +192,26 @@ function nsTip() { // the pin's value at the current fade position; a keyframe w
   nsPin.txt = txt;
 }
 const nsOvl = (src, o) => L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: o, interactive: false, attribution: NS_ATTR });
+// nsImg is keyed by url in load order: keep the newest NS_KEEP entries (a +48 selection is 9 images + 9 value PNGs) and always the shown selection
+const NS_KEEP = 30, nsUrls = g => g.keys.flatMap(T => [nsUrl(nsRange().imageOverlayURL, T), nsUrl(nsRange().dataOverlayURL, T)]);
+function nsTrim(g) { const ks = Object.keys(nsImg), keep = nsUrls(g); for (const u of ks.slice(0, Math.max(0, ks.length - NS_KEEP))) if (!keep.includes(u)) delete nsImg[u]; }
 const nsStop = () => { cancelAnimationFrame(nsRaf); nsOv?.remove(); nsOv = nsGo = null; };
+const nsOpen = (g, i) => { g.a = i; nsOv = L.layerGroup([g.A = nsOvl(g.fr[i], .55)]).addTo(map); if (g.keys.length > 1) nsRaf = requestAnimationFrame(nsTick); }; // first frame on the map
 function nsShow() {
   if (nsGo) return; // shown or loading (renderMap stops any other selection)
-  const g = nsGo = { id: nsCur(), keys: nsKf(), fr: [], a: 0, b: -1, t: 0 }, n = g.keys.length, cfg = nsC(), tpl = nsRange().imageOverlayURL, now = g.keys.indexOf(nsEnd);
-  for (const i of g.keys.map((_, j) => (now + j) % n)) { const url = nsUrl(tpl, g.keys[i]); // now first, then in playback order
+  const g = nsGo = { id: nsCur(), keys: nsKf(), fr: [], a: 0, b: -1, t: 0 }, n = g.keys.length, cfg = nsC(), tpl = nsRange().imageOverlayURL, now = g.keys.indexOf(nsEnd), first = nsPlay ? now : lay.nsw < 0 ? 0 : n - 1; // playing starts at Now; paused shows the end the button names, so the window still does something
+  for (const i of g.keys.map((_, j) => (first + j) % n)) { const url = nsUrl(tpl, g.keys[i]); // that frame first, then in playback order
     (nsImg[url] ??= nsDraw(url, cfg)).then(src => { if (nsGo !== g) return; // the selection moved on while this loaded
-      g.fr[i] = src; if (nsOv) return;
-      g.a = i; nsOv = L.layerGroup([g.A = nsOvl(src, .55)]).addTo(map); if (n > 1) nsRaf = requestAnimationFrame(nsTick); },
-    () => { delete nsImg[url]; if (nsGo !== g) return; g.fr[i] = false; if (g.keys.every((_, j) => g.fr[j] === false)) { nsStop(); nsErr[lay.wx] = true; nsPanel(); renderMap(); } }); }
+      g.fr[i] = src; if (nsOv || !nsPlay && i !== first && g.fr[first] === undefined) return; // paused: wait for the frame it should show
+      nsOpen(g, i); },
+    () => { delete nsImg[url]; if (nsGo !== g) return; g.fr[i] = false; if (i === first && !nsOv) { const j = g.fr.findIndex(f => f); if (j >= 0) nsOpen(g, j); } if (g.keys.every((_, j) => g.fr[j] === false)) { nsStop(); nsErr[lay.wx] = true; nsPanel(); renderMap(); } }); }
+  nsTrim(g);
 }
 function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); one loop of the window takes ~7 s
   const g = nsGo, n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = nsPlay && requestAnimationFrame(nsTick); // paused: draw this frame, then stop (play restarts the loop)
   let b = g.a; do b = (b + 1) % n; while (g.fr[b] === false && b !== g.a); // a failed keyframe is skipped
-  if (b === g.a || !g.fr[b]) return; // one good frame only, or the next one is still loading
+  if (b === g.a) { nsRaf = 0; return; } // one good frame only (the others failed): nothing to animate, stop the loop
+  if (!g.fr[b]) return; // the next one is still loading
   if (g.b !== b) { g.b = b; g.B ? g.B.setUrl(g.fr[b]) : nsOv.addLayer(g.B = nsOvl(g.fr[b], 0)); }
   if (nsPlay) g.t += dt * n / 7000;
   if (g.t >= 1) { [g.A, g.B] = [g.B, g.A]; g.a = b; g.b = -1; g.t = 0; }
