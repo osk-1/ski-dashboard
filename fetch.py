@@ -656,8 +656,9 @@ def main():
                 note("vorarlberg", f"history failed: {st['id']} {e}")
     for st in stations:
         st["flags"] = check(st, hours, now)
-    with open("data/stations.json", "w") as fh:
-        json.dump({"updated": now.isoformat(timespec="minutes"), "stations": stations}, fh)
+    out = {
+        "data/stations.json": json.dumps({"updated": now.isoformat(timespec="minutes"), "stations": stations})
+    }  # written together at the end: a crash mid-run must not leave new stations beside old hourly data
     fsrc = "failed"
     try:  # secondary source: a failure must not abort the run
         model, name, warning, perr = forecast(stations)
@@ -672,8 +673,7 @@ def main():
     hs_rise(hours, STATIONS)
     hourly["hours"] = {k: {f: m for f, m in v.items() if m} for k, v in prune_hours(hours, now).items()}  # empty maps omitted
     hour_flags(hourly["hours"])
-    with open("data/hourly.json", "w") as fh:
-        json.dump(hourly, fh, sort_keys=True, separators=(",", ":"))
+    out["data/hourly.json"] = json.dumps(hourly, sort_keys=True, separators=(",", ":"))
     ids = {s["region"].split()[0] for s in stations if s.get("region")}
     try:  # a bulletin that fails keeps its regions from the last run
         with open("data/danger.json") as fh:
@@ -690,8 +690,7 @@ def main():
                 continue
             fail("bulletins", "; ".join(filter(None, [src["bulletins"]["error"], f"{name}: {e}"])))
     if regions:
-        with open("data/danger.json", "w") as fh:
-            json.dump({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")}, fh)
+        out["data/danger.json"] = json.dumps({"source": ", ".join(BULLETINS), "regions": regions, "generated": now.isoformat(timespec="minutes")})
     health = {
         "run": now.isoformat(timespec="minutes"),
         "sources": src,
@@ -702,8 +701,12 @@ def main():
             if not s["date"] or datetime.fromisoformat(s["date"]) < now - timedelta(hours=24)
         ],
     }
-    with open("data/health.json", "w") as fh:
-        json.dump(health, fh)
+    out["data/health.json"] = json.dumps(health)
+    for path, text in out.items():
+        with open(path + ".tmp", "w") as fh:
+            fh.write(text)
+    for path in out:
+        os.replace(path + ".tmp", path)
     print(f"{len(stations)} stations, {len(hourly['hours'])} hours, forecast: {fsrc}")
 
 

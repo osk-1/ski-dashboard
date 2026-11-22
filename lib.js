@@ -46,12 +46,16 @@ const keyMs = k => {
   const t = Date.UTC(+k.slice(0, 4), k.slice(5, 7) - 1, +k.slice(8, 10), +k.slice(11, 13));
   return [t - H, t - 2 * H].find(x => viennaKey(x) === k) ?? null;
 };
+// sorted hour keys, computed once per hours object (WeakMap: the object is replaced, never edited in place, so the cache stays valid)
+const KEYS = new WeakMap();
+const sortedKeys = hours => {
+  let k = KEYS.get(hours);
+  if (!k) KEYS.set(hours, (k = Object.keys(hours).sort()));
+  return k;
+};
 // "now" for the window: real time, or the newest measured hour when that is more than 7 days old (dead feed, test fixtures)
 const anchorMs = (hours, now) => {
-  const k = Object.keys(hours)
-    .sort()
-    .reverse()
-    .find(k => MEASURED.some(f => hours[k][f] && Object.keys(hours[k][f]).length));
+  const k = sortedKeys(hours).findLast(k => MEASURED.some(f => hours[k][f] && Object.keys(hours[k][f]).length));
   const t = k && keyMs(k);
   return t != null && now - t > 7 * 24 * H ? t : now;
 };
@@ -95,10 +99,7 @@ const binSum = (pts, step, extra = []) => {
 // newest recorded value of a field at or before `to`
 const latest = (hours, field, id, to) => {
   const lim = viennaKey(to),
-    k = Object.keys(hours)
-      .sort()
-      .reverse()
-      .find(k => k <= lim && hours[k][field]?.[id] != null);
+    k = sortedKeys(hours).findLast(k => k <= lim && hours[k][field]?.[id] != null);
   return k ? { k, y: hours[k][field][id] } : null;
 };
 // chart windows in hours (#40) and the x-axis tick spacing (h) for each

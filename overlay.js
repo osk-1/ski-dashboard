@@ -47,7 +47,7 @@ const nsEnds = () => {
 }; // newest first, every initialTimestamp + k·step
 function nsLoad(k) {
   nsBusy[k] = true;
-  fetch(`https://static.avalanche.report/zamg_meteo/overlays/${k}/config.json`)
+  fetch(`https://static.avalanche.report/zamg_meteo/overlays/${k}/config.json`, { signal: AbortSignal.timeout(15000) })
     .then(r => (r.ok ? r.json() : Promise.reject()))
     .then(c => {
       if (!c.timeRanges?.length || !c.thresholds?.length || !c.boundingBoxes?.some(b => b.lambert || b.bbox)) throw 0;
