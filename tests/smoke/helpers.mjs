@@ -8,10 +8,10 @@ const fixture = (name) => readFileSync(new URL(`../fixtures/data/${name}.json`, 
 export const DESKTOP = { name: "1280", width: 1280, height: 800 };
 export const VIEWPORTS = [{ name: "390", width: 390, height: 844 }, { name: "430", width: 430, height: 932 }];
 
-// overrides: { setup: async (page) => extra page.route calls; desktop: true for a mouse, non-mobile context; storage: {key: value} seeded into localStorage, fixtures: {name: Buffer|string} replacing a data file, null = 404 }
+// overrides: { setup: async (page) => extra page.route calls; reducedMotion: "reduce" to emulate prefers-reduced-motion, desktop: true for a mouse, non-mobile context; storage: {key: value} seeded into localStorage, fixtures: {name: Buffer|string} replacing a data file, null = 404 }
 // Returns { page, context, problems }; problems collects console errors and page exceptions.
 export async function open(browser, vp, scheme, overrides = {}) {
-  const context = await browser.newContext({ viewport: vp, colorScheme: scheme, deviceScaleFactor: 1, isMobile: !overrides.desktop, hasTouch: !overrides.desktop });
+  const context = await browser.newContext({ viewport: vp, colorScheme: scheme, deviceScaleFactor: 1, reducedMotion: overrides.reducedMotion, isMobile: !overrides.desktop, hasTouch: !overrides.desktop });
   const page = await context.newPage();
   const problems = [];
   page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
