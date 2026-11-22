@@ -118,7 +118,8 @@ for (const k of [...CATS.map(c => c[0]), "danger", "peaks"]) lay.on[k] ??= !phon
 lay.nsh ??= 24; lay.nsw ??= 0; // the weather overlay is off by default: it fetches extra images
 // Weather overlay (avalanche.report): config per key, loaded on first selection; nsEnd = selected period end (ms, UTC; hourly overlays: now); nsImg caches url -> reprojected data URL
 // nsGo: the shown (or loading) selection: keyframes, their frames, the fade position; nsOv: its overlays A (+ B while fading); nsAt: the clicked spot and its value per keyframe
-const nsCfg = {}, nsErr = {}, nsBusy = {}, nsImg = {}; let nsEnd, nsOv, nsPin, nsGo, nsRaf, nsAt, nsRm = matchMedia("(prefers-reduced-motion: reduce)"), nsPlay = !nsRm.matches;
+const nsCfg = {}, nsAge = {}, nsErr = {}, nsBusy = {}, nsImg = {}; let nsEnd, nsOv, nsPin, nsGo, nsRaf, nsAt, nsRm = matchMedia("(prefers-reduced-motion: reduce)"), nsPlay = !nsRm.matches;
+const nsFresh = () => { if (Date.now() - nsAge[lay.wx] > 18e5) delete nsCfg[lay.wx]; }; // a config older than 30 min is fetched again, so "Now" is not a stale time
 const nsC = () => nsCfg[lay.wx], nsName = () => WX.find(w => w[0] === lay.wx)[1], nsMinus = v => String(v).replaceAll("-", "−");
 const nsDec = (k, r) => k === "temp" ? (r - 120) / 2 : r; // PNG red channel -> value (temp: °C = (R − 120) / 2)
 const NS_ATTR = 'Weather model: <a href="https://avalanche.report" target="_blank" rel="noopener">GeoSphere Austria via avalanche.report</a>';
@@ -132,7 +133,7 @@ const nsEnds = () => { const r = nsRange(), s = r.timeStepHours * 36e5, i = Date
 function nsLoad(k) {
   nsBusy[k] = true;
   fetch(`https://static.avalanche.report/zamg_meteo/overlays/${k}/config.json`).then(r => r.ok ? r.json() : Promise.reject())
-    .then(c => { if (!c.timeRanges?.length || !c.thresholds?.length || !c.boundingBoxes?.some(b => b.lambert || b.bbox)) throw 0; nsCfg[k] = c; if (lay.wx === k) nsEnd = Date.parse(nsRange().initialTimestamp); })
+    .then(c => { if (!c.timeRanges?.length || !c.thresholds?.length || !c.boundingBoxes?.some(b => b.lambert || b.bbox)) throw 0; nsCfg[k] = c; nsAge[k] = Date.now(); if (lay.wx === k) nsEnd = Date.parse(nsRange().initialTimestamp); })
     .catch(() => { nsErr[k] = true; }).finally(() => { nsBusy[k] = false; nsPanel(); renderMap(); });
 }
 function nsPanel() {
@@ -141,7 +142,7 @@ function nsPanel() {
   for (const w of WX) lp.querySelector(`[data-n="${w[0]}"]`).textContent = nsErr[w[0]] ? "unavailable" : ""; // only the selected one is tried; the note stays until a retry
   if (!lay.wx || !nsC()) { x.innerHTML = ""; return; }
   const ma = Date.parse(nsRange().maxAnalysisTimestamp), ends = nsEnds(), opt = t => `<option value="${t}"${t === nsEnd ? " selected" : ""}>${esc(fmtSlot(t))}</option>`, on = nsKf().length > 1 ? lay.nsw : 0;
-  if (lay.wx !== "new-snow") x.innerHTML = `<div class="seg nsw" role="group" aria-label="Time window">${NSW.map(w => `<button type="button" data-ns="w${w}" aria-pressed="${w === on}"${w && nsKeys(ends, w, nsEnd).length < 2 ? ` aria-disabled="true" title="${w > 0 ? "No forecast for this layer" : "No data this far back"}"` : ""}>${w ? nsMinus((w > 0 ? "+" : "") + w) : "Now"}</button>`).join("")}</div>` + (nsKeys(ends, 3, nsEnd).length < 2 ? `<small class="nsn">No forecast for this layer</small>` : "") + // the hint must reach touch screens and screen readers too
+  if (lay.wx !== "new-snow") x.innerHTML = `<div class="seg nsw" role="group" aria-label="Time window">${NSW.map(w => `<button type="button" data-ns="w${w}" aria-pressed="${w === on}"${w && nsKeys(ends, w, nsEnd).length < Math.abs(w) / nsStep(w) + 1 ? ` aria-disabled="true" title="${w > 0 ? "No forecast for this layer" : "No data this far back"}"` : ""}>${w ? nsMinus((w > 0 ? "+" : "") + w) : "Now"}</button>`).join("")}</div>` + (nsKeys(ends, 3, nsEnd).length < 2 ? `<small class="nsn">No forecast for this layer</small>` : "") + // the hint must reach touch screens and screen readers too
     (on ? `<div class="nsp"><button type="button" data-ns="p" aria-label="${nsPlay ? "Pause" : "Play"}">${nsPlay ? "❚❚" : "▶"}</button><small>every ${nsStep(on)} h${nsPlay ? "" : " · paused"}</small></div>` : "");
   else x.innerHTML = (nsC().timeRanges.length > 1 ? `<label><span>Period</span><select data-ns="h">${nsC().timeRanges.map(r => `<option value="${esc(r.timeRange)}"${r === nsRange() ? " selected" : ""}>${esc(r.timeRange)} h</option>`).join("")}</select></label>` : "") +
     `<label><span>Until</span><select data-ns="t">${[["Forecast", t => t > ma], ["Past", t => t <= ma]].map(([l, f]) => ends.some(f) ? `<optgroup label="${l}">${ends.filter(f).map(opt).join("")}</optgroup>` : "").join("")}</select></label>`;
@@ -185,7 +186,7 @@ function nsClick(e) { // value of the weather PNGs under the click, as a pin wit
 function nsTip() { // the pin's value at the current fade position; a keyframe whose PNG is still loading gives way to the other; a failed one shows –
   const g = nsGo, p = nsAt, b = g?.B ? g.b : -1; if (!p || p.g !== g) return;
   const v = lerp(p.v[g.a], b < 0 ? null : p.v[b], g.t), k = lay.wx; if (v == null) return;
-  const txt = `<b>${Number.isNaN(v) ? "–" : `${k === "new-snow" ? "+" : ""}${nsMinus(Math.round(v * 10) / 10)} ${esc(nsC().units)}${k === "new-snow" ? ` (${esc(nsRange().timeRange)} h)` : ""}`}</b>` +
+  const txt = `<b>${Number.isNaN(v) ? "–" : `${k === "new-snow" ? "+" : ""}${nsMinus(k === "temp" ? Math.round(v * 2) / 2 : Math.round(v))} ${esc(nsC().units)}${k === "new-snow" ? ` (${esc(nsRange().timeRange)} h)` : ""}`}</b>` +
     (g.keys.length > 1 ? ` · ${(g.lbl ??= [])[b < 0 || g.t < .5 ? g.a : b] ??= esc(new Date(g.keys[b < 0 || g.t < .5 ? g.a : b]).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" }))}` : ""); // label cached per keyframe: a formatter per frame is wasted work
   if (!nsPin) nsPin = L.circleMarker(p.ll, { pane: "places", radius: 8, interactive: false, color: css("--fg"), weight: 2, fillOpacity: 0 }).addTo(map).bindTooltip(txt, { permanent: true, direction: "right", offset: [8, 0], className: "val" });
   else if (nsPin.txt !== txt) nsPin.setTooltipContent(txt);
@@ -310,7 +311,7 @@ function initMap() {
     const size = () => { p.style.maxHeight = map.getSize().y - 80 + "px"; };
     const done = () => { sync(); try { localStorage.setItem("layers", JSON.stringify(lay)); } catch {} renderSummary(); renderMap(); renderTable(); };
     p.addEventListener("change", e => { const i = e.target;
-      if (i.dataset.wx != null) { lay.wx = i.dataset.wx || null; if (lay.wx) { delete nsErr[lay.wx]; if (nsC()) nsEnd = Date.parse(nsRange().initialTimestamp); } return done(); } // picking an overlay retries a failed load
+      if (i.dataset.wx != null) { lay.wx = i.dataset.wx || null; if (lay.wx) { delete nsErr[lay.wx]; nsFresh(); if (nsC()) nsEnd = Date.parse(nsRange().initialTimestamp); } return done(); } // picking an overlay retries a failed load
       if (i.dataset.ns) { delete nsErr[lay.wx];
         if (i.dataset.ns === "h") { lay.nsh = +i.value; nsEnd = Date.parse(nsRange().initialTimestamp); } else nsEnd = +i.value; return done(); }
       if (i.dataset.cat) lay.on[i.dataset.cat] = i.checked; else lay.hide = i.checked ? lay.hide.filter(x => x !== i.dataset.stn) : [...lay.hide, i.dataset.stn]; done(); });
@@ -318,7 +319,7 @@ function initMap() {
       const w = e.target.closest("input[data-wx]"); if (w?.dataset.wx && w.dataset.wx === lay.wx && nsErr[lay.wx]) { delete nsErr[lay.wx]; return done(); } // clicking the selected, failed overlay again retries (no change event fires)
       const t = e.target.closest("button"); if (!t || t.ariaDisabled) return; // aria-disabled buttons stay focusable and keep their hint
       if (t.dataset.ns === "p") return nsSetPlay(!nsPlay);
-      if (t.dataset.ns) { lay.nsw = +t.dataset.ns.slice(1); delete nsErr[lay.wx]; return done(); }
+      if (t.dataset.ns) { lay.nsw = +t.dataset.ns.slice(1); delete nsErr[lay.wx]; nsFresh(); return done(); }
       const [c, on] = t.dataset.set.split(":"), ids = state.stations.filter(s => catOf(s) === c).map(s => s.id);
       lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; if (on === "1") lay.on[c] = true; done();
     });
