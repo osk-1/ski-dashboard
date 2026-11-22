@@ -175,7 +175,7 @@ const nsMap = (cfg, W, H) => (cfg.idx ??= {})[W + "x" + H] ??= (() => {
 const nsPng = url => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onerror = no; im.onload = () => { try {
   const c = document.createElement("canvas"); c.width = im.width; c.height = im.height; const g = c.getContext("2d"); g.drawImage(im, 0, 0); const px = g.getImageData(0, 0, im.width, im.height).data, d = new Uint8Array(px.length >> 2); for (let i = 0; i < d.length; i++) d[i] = px[i * 4]; ok({ W: im.width, H: im.height, d }); } catch (e) { no(e); } }; im.src = url; });
 function nsClick(e) { // value of the weather PNGs under the click, as a pin with a tooltip that follows the animation
-  if (!nsOv || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive")) return; // stations and their value tags are not map spots
+  if (!nsOv || !nsRange().dataOverlayURL || e.originalEvent?.target.closest?.(".leaflet-tooltip,.leaflet-interactive")) return; // no value PNGs for this layer; stations and their value tags are not map spots
   const p = nsAt = { ll: e.latlng, g: nsGo, v: [] }, k = lay.wx, cfg = nsC(), tpl = nsRange().dataOverlayURL; nsPin?.remove(); nsPin = null;
   nsGo.keys.forEach((T, i) => { const url = nsUrl(tpl, T);
     (nsImg[url] ??= nsPng(url)).then(({ W, H, d }) => { if (nsAt !== p) return; // clicked elsewhere, or the selection moved on while this loaded
@@ -214,7 +214,7 @@ function nsTick(ms) { // fade A (keyframe a) into B (the next good keyframe b); 
   const g = nsGo; if (nsPlay && g.ms != null && ms - g.ms < 32) { nsRaf = requestAnimationFrame(nsTick); return; } // ~30 fps is enough for a slow fade and halves the repaints
   const n = g.keys.length, dt = Math.min(ms - (g.ms ?? ms), 100); g.ms = ms; nsRaf = nsPlay && requestAnimationFrame(nsTick); // paused: draw this frame, then stop (play restarts the loop)
   let b = g.a; do b = (b + 1) % n; while (g.fr[b] === false && b !== g.a); // a failed keyframe is skipped
-  if (b === g.a) { nsRaf = 0; return; } // one good frame only (the others failed): nothing to animate, stop the loop
+  if (b === g.a) { cancelAnimationFrame(nsRaf); nsRaf = 0; return; } // one good frame only (the others failed): nothing to animate, cancel the tick asked for above
   if (!g.fr[b]) return; // the next one is still loading
   if (g.b !== b) { g.b = b; g.B ? g.B.setUrl(g.fr[b]) : nsOv.addLayer(g.B = nsOvl(g.fr[b], 0)); }
   if (!g.B.getElement().complete) return; // the new frame is still decoding: keep the current one, do not fade to blank
