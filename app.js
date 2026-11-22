@@ -96,7 +96,7 @@ function renderDanger() {
   }).join("");
 }
 
-let map, groups, dangerLayer, dangerOk, lc, lp, fitBounds, fitZ;
+let map, groups, dangerLayer, dangerOk, lc, lp, lpFill, fitBounds, fitZ; // lpFill: rebuilds the layers panel, load() calls it when a refresh changes the data
 const landmarks = [];
 const mapDiv = document.getElementById("map");
 const legendOpen = () => document.getElementById("legend").classList.contains("open");
@@ -283,8 +283,9 @@ function initMap() {
   const B = BOUNDS, pad = [.03, .015];
   map = L.map("map", { maxBounds: [[B.lat0 - pad[1], B.lon0 - pad[0]], [B.lat1 + pad[1], B.lon1 + pad[0]]], maxBoundsViscosity: 1, zoomSnap: .25, maxZoom: 16, dragging: !L.Browser.mobile || phone() }); // touch: one finger scrolls the page, two fingers (touchZoom) pan/zoom the map
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 15, maxZoom: 16, attribution: "Relief: Esri World Hillshade" }).addTo(map);
-  const near = L.latLngBounds(state.stations.map(s => [s.lat, s.lon])).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
-  fitBounds = L.latLngBounds([...state.stations.map(s => [s.lat, s.lon]), ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
+  const at = placed().length ? placed().map(s => [s.lat, s.lon]) : [[B.lat0, B.lon0], [B.lat1, B.lon1]]; // a misplaced station (wild coordinates) must not zoom out the fit; none placed: the BOUNDS box (empty bounds throw)
+  const near = L.latLngBounds(at).pad(.15); // landmarks around the stations stay in view; far ones (Ischgl) would only shrink the map
+  fitBounds = L.latLngBounds([...at, ...[...PLACES, ...PEAKS].map(([, lon, lat]) => [lat, lon]).filter(c => near.contains(c))]);
   const reset = () => { map.fitBounds(fitBounds, { paddingTopLeft: [60, 40], paddingBottomRight: [40, 40 + sheetPeek()] }); }; // extra left padding keeps the view clear of the zoom/reset controls; bottom: the lowered sheet
   const fit = () => { reset(); fitZ = map.getZoom(); map.setMinZoom(fitZ - 1); };
   fit();
@@ -301,13 +302,15 @@ function initMap() {
     b.type = "button"; b.title = "Map layers"; b.setAttribute("aria-label", "Map layers"); b.setAttribute("aria-controls", "lp");
     b.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 15 5.5 8 9.5 1 5.5ZM1 8.5l7 4 7-4"/></svg>';
     p.id = "lp"; p.hidden = true; b.setAttribute("aria-expanded", !p.hidden);
+    const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : i.dataset.wx != null ? i.dataset.wx === (lay.wx ?? "") : !lay.hide.includes(i.dataset.stn); nsPanel(); };
+    lpFill = () => { // also on a refresh: dangerOk or the stations may have changed (p.hidden, the open state, is kept; listeners are delegated on p)
     const stn = c => placed().filter(s => catOf(s) === c).sort((a, b) => b.alt - a.alt);
     const row = (attr, id, text, extra = "") => `<label><input type="checkbox" ${attr}="${esc(id)}"> <span>${esc(text)}${extra}</span></label>`;
     const stale = Object.values(state.danger?.regions || {}).some(r => new Date(r.valid_end) < new Date());
     p.innerHTML = [...CATS.filter(([k]) => stn(k).length).map(([k, n]) => row("data-cat", k, n)), ...dangerOk ? [row("data-cat", "danger", "Avalanche danger", stale ? " <small>not current</small>" : "")] : [], row("data-cat", "peaks", "Peaks")].join("") +
       `<fieldset class="wx"><legend>Weather overlay</legend>${[[null, "None"], ...WX].map(([k, n]) => `<label><input type="radio" name="wx" data-wx="${k ?? ""}"> <span>${n} <small data-n="${k ?? ""}"></small></span></label>`).join("")}<div class="ns" id="nsx"></div></fieldset>` +
       CATS.filter(([k]) => stn(k).length).map(([k, n]) => `<div role="group" aria-label="${n} stations"><div class="gh"><b>${n} stations</b><button type="button" data-set="${k}:1" aria-label="All ${n.toLowerCase()} stations">All</button><button type="button" data-set="${k}:0" aria-label="No ${n.toLowerCase()} stations">None</button></div>${stn(k).map(s => row("data-stn", s.id, s.name, ` <small>${s.alt} m</small>`)).join("")}</div>`).join("");
-    const sync = () => { for (const i of p.querySelectorAll("input")) i.checked = i.dataset.cat ? lay.on[i.dataset.cat] : i.dataset.wx != null ? i.dataset.wx === (lay.wx ?? "") : !lay.hide.includes(i.dataset.stn); nsPanel(); };
+    sync(); };
     const size = () => { p.style.maxHeight = map.getSize().y - 80 + "px"; };
     const done = () => { sync(); try { localStorage.setItem("layers", JSON.stringify(lay)); } catch {} renderSummary(); renderMap(); renderTable(); };
     p.addEventListener("change", e => { const i = e.target;
@@ -324,7 +327,7 @@ function initMap() {
       lay.hide = [...lay.hide.filter(x => !ids.includes(x)), ...on === "1" ? [] : ids]; if (on === "1") lay.on[c] = true; done();
     });
     b.onclick = () => { p.hidden = !p.hidden; b.setAttribute("aria-expanded", !p.hidden); renderMap(); }; // labels dodge the open panel
-    map.on("resize", size); size(); sync();
+    map.on("resize", size); size(); lpFill();
     L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d); L.DomEvent.on(d, "keydown", L.DomEvent.stopPropagation);
     return d; } });
   map.createPane("places").style.zIndex = 350; // under the station dots
@@ -844,7 +847,6 @@ tableDetails.addEventListener("toggle", () => {
   try { localStorage.setItem("tableOpen", savedOpen); } catch {}
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
-new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 const note = document.getElementById("updated");
 let lastLoad = 0, loading = false, hrFailed = false; // hrFailed: the last hourly.json fetch failed, so the next good one must redraw even with the same stations.json
@@ -866,7 +868,7 @@ async function load() {
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations${hr ? "" : " · hourly data couldn't be refreshed"}`;
     lastLoad = Date.now();
     if (!changed) return; // identical data: a rebuild would drop keyboard focus and chart cursors
-    if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); } // restyle polygons for the new bulletin
+    if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); lpFill(); } // restyle polygons for the new bulletin
     renderAll();
   } catch (e) { console.error(e); note.textContent = "Something went wrong showing the data. Reload the page to try again."; // a render bug is not a load failure
   } finally { loading = false; }
