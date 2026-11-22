@@ -46,6 +46,7 @@ STATIONS = (
     "IPIS1",
 )
 HOURLY_DAYS = 7
+UTC_KEY = "%Y-%m-%dT%H"  # hourly.json "tried": archive hours fetched fine, so an hour with no Tirol value is not requested again
 BACKFILL_MAX, BACKFILL_SECONDS = 48, 300  # Tirol archive files per run (newest missing hours first) and wall-clock budget; the rest wait for later runs
 MET_SECONDS = 120  # wall-clock budget for the MET Norway fallback loop; stations not reached in time are named as failed
 MFIELDS = ("pm", "sm", "mt", "sd", "mw", "mg", "md")  # model fields
@@ -110,8 +111,14 @@ REFERENCE = {
 
 
 def get_json(url):
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
-        return json.load(r)
+    for attempt in (1, 2):  # one retry on transient network errors; bad JSON is not retried
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
+                return json.load(r)
+        except (OSError, http.client.HTTPException) as e:
+            if attempt == 2 or (isinstance(e, urllib.error.HTTPError) and e.code < 500):  # a 404 will not change in 2 s
+                raise
+            time.sleep(2)
 
 
 def snapshot_url(slot_local):
@@ -178,7 +185,7 @@ def vor_station(f):
         "wg": num(scale("VW", 3.6)),
         "wg_boe": num(scale("VW_MAX", 3.6)),
         "wr": num(p.get("DW")),
-        "date": vienna(p["date"]),
+        "date": vienna(p.get("date")),
     }
 
 
@@ -321,12 +328,13 @@ def tirol_hours(feats, by_uuid):
     return out
 
 
-def missing_hours(hours, ids, now):
-    """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value."""
+def missing_hours(hours, ids, now, tried=()):
+    """Past full hours of the window (current hour excluded: it comes from the live feed) where no id has any measured value
+    and whose archive file was not already fetched fine (tried: UTC hour keys)."""
     have = {k for k, v in hours.items() if any(id in v.get(f, {}) for f in MEASURED for id in ids)}
     t = now.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)  # step in UTC: local wall hours skip/repeat on DST days
     out = [t - timedelta(hours=i) for i in range(HOURLY_DAYS * 24, 0, -1)]
-    return [x for x in out if hkey(x) not in have]
+    return [x for x in out if hkey(x) not in have and x.strftime(UTC_KEY) not in tried]
 
 
 def backfill(missing):
@@ -570,6 +578,16 @@ def forecast(stations, fetch=get_json):
     return model, "MET Norway", down, perr
 
 
+def should_run(now, live_updated, max_age_min):
+    """True inside Vienna 06:00-19:59 when the live data is missing, unreadable or older than max_age_min."""
+    if not 6 <= now.astimezone(TZ).hour < 20:
+        return False
+    try:
+        return now - datetime.fromisoformat(live_updated) > timedelta(minutes=max_age_min)
+    except (TypeError, ValueError):  # None, garbage or naive timestamp: treat as stale
+        return True
+
+
 def main():
     now = datetime.now(TZ)
     src = {k: {"ok": True, "error": None, "detail": None} for k in ("tirol", "tawes", "vorarlberg", "model", "bulletins")}  # health.json
@@ -616,7 +634,8 @@ def main():
             print("hourly.json unreadable, starting empty:", e, file=sys.stderr)
         hourly = {"model": {"source": None, "issued": None}, "hours": {}}
         hours = hourly["hours"]
-    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now), time.monotonic()
+    tried = set(hourly.get("tried", []))
+    bad, miss, t0 = 0, missing_hours(hours, STATIONS, now, tried), time.monotonic()
     todo = backfill(miss)  # Tirol archive: only hours not yet recorded, capped so a slow archive can't time out the job
     for i, t in enumerate(todo):
         if time.monotonic() - t0 > BACKFILL_SECONDS:
@@ -625,6 +644,7 @@ def main():
         try:
             for k, maps in tirol_hours(get_json(snapshot_url(t))["features"], by_uuid).items():
                 hmerge(hours, k, maps, keep=True)  # first value read at its own hour stays
+            tried.add(t.strftime(UTC_KEY))
         except Exception as e:
             print("skip hour", t.isoformat(), e, file=sys.stderr)
             bad += 1
@@ -675,6 +695,8 @@ def main():
         print("forecast failed:", e, file=sys.stderr)
         fail("model", e)
     hs_rise(hours, STATIONS)
+    lo = (now.astimezone(timezone.utc) - timedelta(days=HOURLY_DAYS)).strftime(UTC_KEY)
+    hourly["tried"] = sorted(k for k in tried if k >= lo)
     hourly["hours"] = {k: {f: m for f, m in v.items() if m} for k, v in prune_hours(hours, now).items()}  # empty maps omitted
     hour_flags(hourly["hours"])
     out["data/hourly.json"] = json.dumps(hourly, sort_keys=True, separators=(",", ":"))
@@ -715,4 +737,12 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--gate"]:  # workflow Gate step: prints true/false, never fetches
+        try:
+            with open("/tmp/live.json") as fh:
+                live = json.load(fh)["updated"]
+        except Exception:
+            live = None  # missing or unreadable live data counts as stale
+        print("true" if should_run(datetime.now(timezone.utc), live, int(os.environ["MAX_AGE_MIN"])) else "false")
+        sys.exit(0)
     main()

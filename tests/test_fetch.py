@@ -152,6 +152,7 @@ def selftest():
     )
     assert v["date"] == "2026-11-20T10:00:00+01:00"
     assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A", "date": "2026-11-20 09:00:00+00:00"}})["lt"] is None
+    assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A"}})["date"] is None
     smet = (
         "SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
         "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n"
@@ -334,6 +335,9 @@ def selftest():
     # backfill: newest missing hours first, at most BACKFILL_MAX per run
     mh = missing_hours({}, STATIONS, now)
     assert (len(backfill(mh)), backfill(mh)[0], backfill(mh)[-1], backfill(mh[:3])) == (48, mh[-1], mh[-48], mh[2::-1])
+    # an archive hour already fetched fine is not requested again, even though it has no value
+    done = {mh[5].strftime("%Y-%m-%dT%H")}
+    assert missing_hours({}, STATIONS, now, done) == mh[:5] + mh[6:]
     # a fallback run (no sd/sm) must not erase earlier Open-Meteo hours
     hm = {"2026-11-20T12": {"sd": {"A": 50.0}, "mt": {"A": 1.0, "B": 2.0}}}
     merge_model(hm, {"2026-11-20T12": {"mt": {"A": -3.0}, "sd": {}}})
@@ -424,6 +428,35 @@ def selftest():
     finally:
         fetch.MET_SECONDS = budget
     assert fmodel == {} and warning.endswith("; MET Norway failed for: A, B"), (fmodel, warning)
+
+    # get_json(): one retry after a transient error (sleep patched); a second failure is raised
+    with mock.patch.object(fetch.time, "sleep"), mock.patch.object(fetch.urllib.request, "urlopen", side_effect=[OSError("blip"), io.BytesIO(b'{"a":1}')]):
+        assert fetch.get_json("https://example.invalid/x") == {"a": 1}
+    with mock.patch.object(fetch.time, "sleep"), mock.patch.object(fetch.urllib.request, "urlopen", side_effect=OSError("down")) as uo:
+        try:
+            fetch.get_json("https://example.invalid/x")
+            raise AssertionError("second failure was not raised")
+        except OSError:
+            pass
+        assert uo.call_count == 2, uo.call_count
+    # a 404 is not retried
+    nf404 = urllib.error.HTTPError("https://example.invalid/x", 404, "nf", None, None)
+    with mock.patch.object(fetch.time, "sleep"), mock.patch.object(fetch.urllib.request, "urlopen", side_effect=nf404) as uo:
+        try:
+            fetch.get_json("https://example.invalid/x")
+        except urllib.error.HTTPError:
+            pass
+        assert uo.call_count == 1, uo.call_count
+    # should_run(): Vienna window 06:00-19:59 (winter, UTC+1), then live-data age vs max_age_min
+    stale = "2026-11-22T00:00:00+00:00"
+    assert not should_run(datetime(2026, 11, 23, 5, 59, tzinfo=TZ), stale, 20)
+    assert not should_run(datetime(2026, 11, 23, 20, 0, tzinfo=TZ), stale, 20)
+    assert should_run(datetime(2026, 11, 23, 6, 0, tzinfo=TZ), None, 20)
+    n = datetime(2026, 11, 23, 19, 59, tzinfo=TZ)
+    assert should_run(n, None, 20)
+    assert not should_run(n, (n - timedelta(minutes=19)).isoformat(), 20)
+    assert should_run(n, (n - timedelta(minutes=21)).isoformat(), 20)
+    assert should_run(n, "garbage", 20)
 
 
 class FetchTests(unittest.TestCase):
