@@ -1982,7 +1982,7 @@ async function load() {
     state.regions = rg ?? state.regions; // like hourly: a failed refresh keeps the polygons
     state.stations = st.stations || [];
     state.hourly = hr ?? state.hourly;
-    state.health = he;
+    state.health = he ?? state.health;
     state.updated = st.updated; // a failed hourly fetch keeps the charts' data
     if (!placed().some(s => s.id === state.selected))
       state.selected = placed()
