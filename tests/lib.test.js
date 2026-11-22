@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { binSum, tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust } = require("../lib.js");
+const { binSum, tierOf, groupByPixel, describeGroup, band, esc, hasWind, arrowOn, lambert, viennaKey, keyMs, anchorMs, slice, WINDOWS, winOr, tickStepH, risePts, delta, latest, extreme, refroze, valueState, misplaced, goodOnly, refreshStale, bandOf, BANDS, median, compass, sumField, riseOf, extremeOf, bandStats, strongestGust, nsKeys, nsStep, lerp } = require("../lib.js");
 
 test("band: cm thresholds", () => {
   assert.equal(band(null), -1);
@@ -228,4 +228,32 @@ test("binSum: Vienna-day and 3 h bins, null only when a bin has no value, extra 
   assert.deepEqual(d.map(b => [b.y, b.n, b.of, b.sm]), [[1, 1, 2, 2], [2.3, 2, 4, 4.5]]);
   assert.equal(d[0].x, keyMs("2026-11-20T12")); assert.equal(binSum(pts, 3)[1].x, keyMs("2026-11-21T00") + 1.5 * 3600e3);
   assert.deepEqual(binSum(pts, 3).map(b => [b.y, b.of]), [[1, 2], [2.3, 3], [null, 1]]);
+});
+
+const NS_H = 36e5, NOW = Date.UTC(2026, 0, 10, 12), ENDS = Array.from({ length: 24 + 48 + 1 }, (_, i) => NOW + (48 - i) * NS_H); // newest first, -24..+48
+test("nsStep: step table", () => {
+  assert.deepEqual([-24, -12, -6, -3, 0, 3, 6, 12, 24, 48].map(nsStep), [3, 2, 1, 1, 1, 1, 1, 2, 3, 6]);
+});
+test("nsKeys: <= 9 ascending, on the step grid, include nowT", () => {
+  for (const w of [-24, -12, -6, -3, 3, 6, 12, 24, 48]) {
+    const k = nsKeys(ENDS, w, NOW), s = nsStep(w) * NS_H;
+    assert.ok(k.length <= 9 && k.includes(NOW) && k.includes(NOW + w * NS_H), `win ${w}`); // reaches the end the button names
+    assert.deepEqual(k, [...k].sort((a, b) => a - b));
+    assert.ok(k.every((t, i) => i === 0 || t - k[i - 1] === s) && k.every(t => (t - NOW) % s === 0 && (w < 0 ? t >= NOW + w * NS_H && t <= NOW : t >= NOW && t <= NOW + w * NS_H)), `win ${w}`);
+  }
+  assert.deepEqual(nsKeys(ENDS, 6, NOW), [0, 1, 2, 3, 4, 5, 6].map(i => NOW + i * NS_H));
+  assert.deepEqual(nsKeys(ENDS, -12, NOW), [-12, -10, -8, -6, -4, -2, 0].map(i => NOW + i * NS_H));
+  assert.deepEqual(nsKeys(ENDS, 48, NOW), [0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => NOW + i * 6 * NS_H));
+  assert.deepEqual(nsKeys(ENDS, -24, NOW), [-8, -7, -6, -5, -4, -3, -2, -1, 0].map(i => NOW + i * 3 * NS_H));
+});
+test("nsKeys: Now, and clipped to the available range", () => {
+  assert.deepEqual(nsKeys(ENDS, 0, NOW), [NOW]);
+  assert.deepEqual(nsKeys(ENDS.filter(t => t <= NOW), 48, NOW), [NOW]); // snow height: no forecast
+  assert.deepEqual(nsKeys(ENDS.filter(t => t <= NOW), 3, NOW), [NOW]);
+  assert.deepEqual(nsKeys(ENDS.filter(t => t !== NOW), 6, NOW), []); // nowT off the grid or outside the range: no keyframes (app falls back to the single nowT frame)
+  assert.deepEqual(nsKeys(ENDS.filter(t => t >= NOW - 2 * NS_H), -6, NOW), [-2, -1, 0].map(i => NOW + i * NS_H));
+});
+test("lerp: ends, middle, null-safe", () => {
+  assert.equal(lerp(2, 6, 0), 2); assert.equal(lerp(2, 6, 0.5), 4); assert.equal(lerp(2, 6, 1), 6);
+  assert.equal(lerp(null, 6, 0.5), 6); assert.equal(lerp(2, null, 0.5), 2); assert.equal(lerp(null, null, 0.5), null);
 });

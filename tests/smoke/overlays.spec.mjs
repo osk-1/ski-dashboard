@@ -1,4 +1,4 @@
-/* global map, L, document, window, Image, nsImg -- page globals inside page.evaluate */
+/* global map, L, document, window, Image, nsImg, nsRaf, nsGo, nsTrim, nsPin, requestAnimationFrame -- page globals inside page.evaluate */
 import { deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import { DESKTOP, open, VIEWPORTS } from "./helpers.mjs";
@@ -34,7 +34,8 @@ const setup = (fail = []) => async (page) => {
     const u = new URL(route.request().url()), k = u.pathname.split("/")[3], h = { "access-control-allow-origin": "*" };
     if (fail.includes(k)) return route.fulfill({ status: 404, headers: h, body: "" });
     if (u.pathname.endsWith("config.json")) return route.fulfill({ contentType: "application/json", headers: h, body: JSON.stringify(CFG[k]) });
-    return route.fulfill({ contentType: "image/png", headers: h, body: png(DATA[k]) }); // a PNG also serves as the "gif"
+    const dh = (Number(u.pathname.match(/_(\d\d)-00_/)?.[1] ?? 19) - 19 + 24) % 24; // temp differs per hour (R + hours after 19:00) so lerped values change
+    return route.fulfill({ contentType: "image/png", headers: h, body: png(k === "temp" ? DATA[k].map((r) => r.map((v) => v + dh)) : DATA[k]) }); // a PNG also serves as the "gif"
   });
 };
 const openPanel = async (page) => { await page.getByRole("button", { name: "Map layers" }).click(); await expect(page.locator("#lp")).toBeVisible(); };
@@ -54,7 +55,9 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator("#legend .ls.ns")).toContainText("−10–−5"); // ...in both numbers
   await expect(page.locator("#legend .ls.ns")).toContainText("°C");
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(0); // hourly: no period
-  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Past"] option')).toHaveCount(25); // now and 24 h back, not 7 days
+  await expect(page.locator('#lp [data-ns="t"]')).toHaveCount(0); // hourly: window buttons, no until
+  await expect(page.locator('#lp [data-ns="w-24"]')).toBeEnabled(); // 24 h back...
+  await expect(page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true"); // ...Now by default
   await radio(page, "Wind").check();
   await expect(page.locator('#lp input[name="wx"]:checked')).toHaveCount(1);
   await expect(radio(page, "Wind")).toBeChecked();
@@ -64,7 +67,8 @@ test("exclusive selection, legend, period, until", async ({ browser }) => {
   await expect(page.locator('#lp [data-ns="h"]')).toHaveCount(1);
   await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
   await radio(page, "Snow depth").check();
-  await expect(page.locator('#lp [data-ns="t"] optgroup[label="Forecast"]')).toHaveCount(0); // analysis only
+  await expect(page.locator('#lp [data-ns="w3"]')).toHaveAttribute("aria-disabled", "true"); // analysis only
+  await expect(page.locator('#lp [data-ns="w-3"]')).toBeEnabled();
   // the danger checkbox is independent of the radio group
   const danger = page.locator("#lp label", { hasText: "Avalanche danger" }).locator("input");
   const was = await danger.isChecked();
@@ -157,3 +161,171 @@ for (const vp of [DESKTOP, ...VIEWPORTS]) for (const scheme of ["light", "dark"]
     expect(problems).toEqual([]);
   });
 }
+
+const ops = (page) => page.evaluate(() => [...document.querySelectorAll("#map .leaflet-image-layer")].map((e) => +e.style.opacity));
+// distinct opacity readings so far, polled (no sleeps)
+const seen = async (page, n) => { const all = new Set(); await expect.poll(async () => { (await ops(page)).forEach((o) => all.add(o.toFixed(3))); return all.size; }, { timeout: 15000 }).toBeGreaterThanOrEqual(n); return all; };
+
+test("+6 animates: several frames load, opacity changes", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  const gifs = new Set(); page.on("request", (r) => { if (/temp\/.*\.gif/.test(r.url())) gifs.add(r.url()); });
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator('#lp [data-ns="w6"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('#lp [data-ns="p"]')).toHaveAttribute("aria-label", "Pause");
+  await expect(page.locator("#lp .nsp small")).toContainText(/every \d+ h/);
+  await expect.poll(() => gifs.size, { timeout: 15000 }).toBeGreaterThan(2);
+  await seen(page, 3);
+  expect(problems).toEqual([]);
+});
+
+test("Now stays static", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  await expect(page.locator('#lp [data-ns="p"]')).toHaveCount(0);
+  const before = await ops(page);
+  expect(before).toEqual([.55]);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))))); // a few frames
+  expect(await ops(page)).toEqual([.55]);
+  expect(problems).toEqual([]);
+});
+
+test("Snow depth disables the + buttons", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await openPanel(page);
+  await radio(page, "Snow depth").check();
+  for (const h of [3, 6, 12, 24, 48]) await expect(page.locator(`#lp [data-ns="w${h}"]`)).toHaveAttribute("aria-disabled", "true");
+  await expect(page.locator("#lp .nsn")).toHaveText("No forecast for this layer"); // visible, not only a hover title
+  await page.locator('#lp [data-ns="w6"]').click({ force: true }); // a click on a disabled window does nothing
+  await expect(page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a clicked pin's value changes while animating", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer").first()).toBeAttached();
+  await click(page, 47.13, 10.26);
+  await expect(pin(page)).toBeVisible({ timeout: 15000 });
+  const texts = new Set();
+  await expect.poll(async () => { texts.add(await pin(page).innerText()); return texts.size; }, { timeout: 15000 }).toBeGreaterThan(1);
+  expect(problems).toEqual([]);
+});
+
+test("reduced motion starts paused", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, reducedMotion: "reduce", setup: setup() });
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator('#lp [data-ns="p"]')).toHaveAttribute("aria-label", "Play");
+  await expect(page.locator("#map .leaflet-image-layer").first()).toBeAttached();
+  const before = await ops(page);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
+  expect(await ops(page)).toEqual(before);
+  await expect(page.locator("#lp .nsp small")).toContainText("paused");
+  await click(page, 47.13, 10.26); // paused: the map shows the end the button names (+6 h = 02:00 Vienna), not Now
+  await expect(pin(page)).toContainText("Sun 02:00", { timeout: 15000 });
+  await page.locator('#lp [data-ns="p"]').click(); // play works
+  await expect(page.locator('#lp [data-ns="p"]')).toHaveAttribute("aria-label", "Pause");
+  await seen(page, 2);
+  expect(problems).toEqual([]);
+});
+
+// all hourly images of a window fail -> the layer says unavailable; one failing frame is skipped and the loop keeps running
+const failGifs = (page, hours) => page.route(`${BASE}/temp/**/*.gif`, (r) => r.request().url().match(/_(\d\d)-00_/) && (hours === "all" || hours.includes(r.request().url().match(/_(\d\d)-00_/)[1])) ? r.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "" }) : r.fallback());
+
+test("a failing keyframe is skipped, the animation keeps going", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await failGifs(page, ["22"]);
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await seen(page, 3);
+  await expect(page.locator('#lp [data-n="temp"]')).toHaveText("");
+});
+
+test("every keyframe failing shows unavailable", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await failGifs(page, "all");
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator('#lp [data-n="temp"]')).toHaveText("unavailable");
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(0);
+});
+
+test("saved window is restored, a bad one falls back to Now", async ({ browser }) => {
+  let o = await open(browser, DESKTOP, "light", { desktop: true, setup: setup(), storage: { layers: JSON.stringify({ wx: "temp", nsw: 6 }) } });
+  await openPanel(o.page);
+  await expect(o.page.locator('#lp [data-ns="w6"]')).toHaveAttribute("aria-pressed", "true");
+  await o.page.locator('#lp [data-ns="w12"]').click();
+  expect(await o.page.evaluate(() => JSON.parse(localStorage.getItem("layers")).nsw)).toBe(12);
+  o = await open(browser, DESKTOP, "light", { desktop: true, setup: setup(), storage: { layers: JSON.stringify({ wx: "temp", nsw: 7 }) } });
+  await openPanel(o.page);
+  await expect(o.page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a failing value PNG shows – on the pin, not the other hour's value", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await page.route(`${BASE}/temp/**/*.png`, (r) => r.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "" }));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer").first()).toBeAttached();
+  await click(page, 47.13, 10.26);
+  await expect(pin(page)).toContainText("–", { timeout: 15000 });
+});
+
+test("one good frame: the animation loop stops instead of spinning", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await page.route(`${BASE}/temp/**/*.gif`, (r) => /_19-00_/.test(r.request().url()) ? r.fallback() : r.fulfill({ status: 404, headers: { "access-control-allow-origin": "*" }, body: "" }));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => !nsRaf), { timeout: 15000 }).toBe(true);
+  // nsRaf = 0 alone is not enough: no tick may still be scheduled (count requestAnimationFrame calls for 0.5 s)
+  const ticks = await page.evaluate(() => new Promise((ok) => { const raf = window.requestAnimationFrame; let n = 0; window.requestAnimationFrame = (f) => (n++, raf(f)); setTimeout(() => { window.requestAnimationFrame = raf; ok(n); }, 500); }));
+  expect(ticks).toBe(0);
+  await expect(page.locator('#lp [data-n="temp"]')).toHaveText("");
+});
+
+test("a layer without value PNGs ignores map clicks", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  const c = structuredClone(CFG.temp); delete c.timeRanges[0].dataOverlayURL;
+  await page.route(`${BASE}/temp/config.json`, (r) => r.fulfill({ contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(c) }));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  await click(page, 47.13, 10.26);
+  expect(await page.evaluate(() => nsPin)).toBeNull(); // no pin, and no exception (problems)
+  expect(problems).toEqual([]);
+});
+
+test("the image cache is trimmed to the newest entries plus the shown selection", async ({ browser }) => {
+  const { page } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await expect(page.locator("#map .leaflet-image-layer").first()).toBeAttached();
+  const n = await page.evaluate(() => { for (let i = 0; i < 60; i++) nsImg["x" + i] = 1; nsTrim(nsGo); return Object.keys(nsImg).length; });
+  expect(n).toBeLessThanOrEqual(30 + 14); // newest 30 + the selection's own urls
+  expect(await page.evaluate(() => Object.keys(nsImg).includes("x0"))).toBe(false);
+});
+
+test("switching the overlay off drops its images from the cache", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  const urls = () => page.evaluate(() => Object.keys(nsImg));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await seen(page, 2);
+  expect((await urls()).length).toBeGreaterThan(1);
+  await radio(page, "None").check();
+  await expect.poll(urls).toEqual([]);
+  expect(problems).toEqual([]);
+});
