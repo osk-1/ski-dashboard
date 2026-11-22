@@ -152,6 +152,7 @@ def selftest():
     )
     assert v["date"] == "2026-11-20T10:00:00+01:00"
     assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A", "date": "2026-11-20 09:00:00+00:00"}})["lt"] is None
+    assert vor_station({**vf, "properties": {"shortName": "ALBO2", "name": "A"}})["date"] is None
     smet = (
         "SMET 1.1 ASCII\n[HEADER]\nnodata         = -999\nfields         = timestamp TA HS VW\n[DATA]\n"
         "2026-11-19T06:00:00Z 270.1 0.15 10\n2026-11-19T11:00:00Z 271.0 -999 -999\n2026-11-19T16:00:00Z 270.0 -0.01 0.5\n"

@@ -178,7 +178,7 @@ def vor_station(f):
         "wg": num(scale("VW", 3.6)),
         "wg_boe": num(scale("VW_MAX", 3.6)),
         "wr": num(p.get("DW")),
-        "date": vienna(p["date"]),
+        "date": vienna(p.get("date")),
     }
 
 
