@@ -4,9 +4,8 @@ import { readFileSync } from "node:fs";
 const read = (f) => JSON.parse(readFileSync(new URL(`../tests/fixtures/data/${f}.json`, import.meta.url), "utf8"));
 const keys = new Set();
 const add = (o) => Object.keys(o).forEach((k) => keys.add(k));
-const stations = read("stations"), forecast = read("forecast"), danger = read("danger");
+const stations = read("stations"), danger = read("danger");
 add(stations); stations.stations.forEach((s) => { add(s); add(s.flags); if (s.dates) add(s.dates); }); // flags/dates keys are fields or "station"
-add(forecast); Object.values(forecast.points).forEach(add);
 Object.values(read("readings")).forEach(add); // slot keys are dynamic; the keys inside a slot are the fields
 const hourly = read("hourly");
 add(hourly); add(hourly.model);

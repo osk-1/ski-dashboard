@@ -61,14 +61,14 @@ jobs:
           echo "gate: run=$run"
       - name: Download live data
         # The generated data files are no longer in git (regions.json is); download them from the live site.
-        if: steps.gate.outputs.run == 'true' && hashFiles('data/readings.json') == ''
+        if: steps.gate.outputs.run == 'true'
         run: |
           mkdir -p data
-          for f in stations forecast readings danger; do
+          for f in stations readings danger hourly; do
             curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json" -o "data/$f.json"
           done
-          # optional: absent on the first run after they were introduced (fetch.py then backfills hourly.json)
-          for f in hourly health; do
+          # optional: health.json is rewritten each run and fetch.py does not read it back, so a missing copy is fine
+          for f in health; do
             curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$LIVE/$f.json" -o "data/$f.json" || rm -f "data/$f.json"
           done
       - name: Data-loss guard

@@ -222,6 +222,13 @@ test("sumField / riseOf: the repeated 02:00 of the autumn DST change counts once
   assert.deepEqual(sumField(h, "sm", "A", from, to), { v: 3, n: 2, of: 2 });
 });
 
+test("viennaKey cache: one key per UTC hour, right across the autumn DST change, repeat calls agree", () => {
+  const ms = ["2026-10-24T23:30:00Z", "2026-10-25T00:30:00Z", "2026-10-25T01:30:00Z", "2026-10-25T02:30:00Z"].map(Date.parse), want = ["2026-10-25T01", "2026-10-25T02", "2026-10-25T02", "2026-10-25T03"];
+  assert.deepEqual(ms.map(viennaKey), want);
+  assert.deepEqual(ms.map(viennaKey), want); // cached
+  assert.equal(viennaKey(ms[1] + 20 * 60e3), want[1]); // same UTC hour, other minute
+});
+
 test("binSum: Vienna-day and 3 h bins, null only when a bin has no value, extra fields summed", () => {
   const pts = [["2026-11-20T22", 1], ["2026-11-20T23", null], ["2026-11-21T00", 2], ["2026-11-21T01", 0.25], ["2026-11-21T02", null], ["2026-11-21T03", null]].map(([k, y]) => ({ x: keyMs(k), y, k, sm: y && y * 2 }));
   const d = binSum(pts, 24, ["sm"]);
