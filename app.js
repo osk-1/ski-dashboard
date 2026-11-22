@@ -193,11 +193,11 @@ function nsTip() { // the pin's value at the current fade position; a keyframe w
 function nsSetPlay(on) { nsPlay = on; cancelAnimationFrame(nsRaf); if (on && nsOv && nsGo.keys.length > 1) { delete nsGo.ms; nsRaf = requestAnimationFrame(nsTick); } nsPanel(); }
 nsRm.addEventListener("change", () => nsSetPlay(!nsRm.matches)); // the OS setting can change while the page is open
 const nsOvl = (src, o) => L.imageOverlay(src, nsBounds(), { pane: "newsnow", opacity: o, interactive: false, attribution: NS_ATTR });
-const nsStop = () => { cancelAnimationFrame(nsRaf); nsOv?.remove(); nsOv = nsGo = null; };
+const nsStop = () => { cancelAnimationFrame(nsRaf); nsOv?.remove(); nsOv = nsGo = null; if (!lay.wx) for (const u in nsImg) delete nsImg[u]; }; // overlay switched off: free its images
 function nsShow() {
   if (nsGo) return; // shown or loading (renderMap stops any other selection)
   const g = nsGo = { id: nsCur(), keys: nsKf(), fr: [], a: 0, b: -1, t: 0 }, n = g.keys.length, cfg = nsC(), tpl = nsRange().imageOverlayURL, now = g.keys.indexOf(nsEnd);
-  const keep = new Set(g.keys.flatMap(T => [nsUrl(tpl, T), nsUrl(nsRange().dataOverlayURL, T)])); for (const u in nsImg) if (!keep.has(u)) delete nsImg[u]; // images of earlier selections (data URLs, decoded arrays) would pile up on a phone
+  const keep = new Set(g.keys.flatMap(T => [nsUrl(tpl, T), ...nsRange().dataOverlayURL ? [nsUrl(nsRange().dataOverlayURL, T)] : []])); for (const u in nsImg) if (!keep.has(u)) delete nsImg[u]; // images of earlier selections (data URLs, decoded arrays) would pile up on a phone
   for (const i of g.keys.map((_, j) => (now + j) % n)) { const url = nsUrl(tpl, g.keys[i]); // now first, then in playback order
     (nsImg[url] ??= nsDraw(url, cfg)).then(src => { if (nsGo !== g) return; // the selection moved on while this loaded
       g.fr[i] = src; if (nsOv) return;

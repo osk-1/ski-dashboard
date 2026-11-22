@@ -265,3 +265,19 @@ test("saved window is restored, a bad one falls back to Now", async ({ browser }
   await openPanel(o.page);
   await expect(o.page.locator('#lp [data-ns="w0"]')).toHaveAttribute("aria-pressed", "true");
 });
+
+test("switching layer or off drops the old images from the cache", async ({ browser }) => {
+  const { page, problems } = await open(browser, DESKTOP, "light", { desktop: true, setup: setup() });
+  const urls = () => page.evaluate(() => Object.keys(nsImg));
+  await openPanel(page);
+  await radio(page, "Temperature").check();
+  await page.locator('#lp [data-ns="w6"]').click();
+  await seen(page, 2);
+  expect((await urls()).length).toBeGreaterThan(1);
+  await radio(page, "Wind").check();
+  await expect(page.locator("#map .leaflet-image-layer")).toHaveCount(1);
+  expect((await urls()).filter((u) => u.includes("/temp/"))).toEqual([]);
+  await radio(page, "None").check();
+  await expect.poll(urls).toEqual([]);
+  expect(problems).toEqual([]);
+});
