@@ -35,6 +35,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx eslint .
+      - run: npx prettier --check app.js lib.js overlay.js
       - run: npm test
 
   html:
