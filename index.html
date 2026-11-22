@@ -19,16 +19,11 @@
   --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+@media (prefers-color-scheme: dark) { :root {
   --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
   --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873; --wind: #f0a060; --relief-op: .35; --relief-blend: screen; --relief-filter: invert(1);
   --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
   color-scheme: dark } }
-:root[data-theme="dark"] {
-  --bg: #0e151d; --panel: #16202b; --fg: #e5edf5; --muted: #93a3b5; --line: #2a3644;
-  --accent: #6fa3ec; --accent-soft: #1d3150; --land: #1a2531; --village: #c9a873; --wind: #f0a060; --relief-op: .35; --relief-blend: screen; --relief-filter: invert(1);
-  --snow-0: #22344a; --snow-1: #2f5786; --snow-2: #4a7fc0; --snow-3: #7eaaea; --snow-4: #c3dafa;
-  color-scheme: dark }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
 [hidden] { display: none !important; }
 .wrap { max-width: 1180px; margin: 0 auto; padding-block: 20px 40px;

@@ -44,3 +44,17 @@ for (const vp of VIEWPORTS) {
     await context.close();
   });
 }
+
+test("danger.json back after a failed first load adds the danger layer checkbox", async ({ browser }) => {
+  let n = 0;
+  const setup = (page) => page.route("**/data/danger.json", (route) => (++n === 1 ? route.fulfill({ status: 500, body: "" }) : route.fallback()));
+  const { page, context } = await open(browser, VIEWPORTS[0], "light", { setup, storage: mine });
+  await expect(page.locator("#lp input[data-cat=snow]")).toHaveCount(1);
+  await expect(page.locator("#lp input[data-cat=danger]")).toHaveCount(0);
+  await page.locator('button[aria-controls="lp"]').click(); // the panel is open during the refresh and must stay open
+  await page.evaluate("load()");
+  await expect(page.locator("#lp label", { hasText: "Avalanche danger" }).locator("input")).toHaveCount(1);
+  await expect(page.locator("#lp")).toBeVisible();
+  await expect(page.locator("#lp input[data-cat=snow]")).toBeChecked(); // checkbox states are synced after the rebuild
+  await context.close();
+});

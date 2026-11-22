@@ -1,4 +1,5 @@
-/* global map, fitZ, state, renderMap, openCard, document -- page globals inside page.evaluate */
+/* global map, fitZ, state, renderMap, openCard, document, BOUNDS -- page globals inside page.evaluate */
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { open, shot, VIEWPORTS } from "./helpers.mjs";
 
@@ -56,3 +57,13 @@ for (const vp of VIEWPORTS) {
     });
   }
 }
+
+test("a misplaced station far away does not change the initial fit", async ({ browser }) => {
+  const fx = JSON.parse(readFileSync(new URL("../fixtures/data/stations.json", import.meta.url)));
+  const far = JSON.stringify({ ...fx, stations: fx.stations.map((s, i) => (i ? s : { ...s, lat: 0, lon: 0, flags: { station: "location mismatch" } })) }); // reported at 0,0: hidden everywhere, so the fit ignores it
+  const fit = async (fixtures) => { const { page, context } = await open(browser, VIEWPORTS[0], "light", { fixtures }); await expect(page.locator("#map path.leaflet-interactive").first()).toBeVisible();
+    const r = await page.evaluate(() => { const c = map.getCenter(); return { z: map.getZoom(), inB: c.lat > BOUNDS.lat0 && c.lat < BOUNDS.lat1 && c.lng > BOUNDS.lon0 && c.lng < BOUNDS.lon1 }; }); await context.close(); return r; };
+  const ok = await fit({}), bad = await fit({ stations: far });
+  expect(bad.inB).toBe(true);
+  expect(bad.z).toBeGreaterThanOrEqual(ok.z); // one station fewer can only tighten the fit, never zoom out to the world
+});

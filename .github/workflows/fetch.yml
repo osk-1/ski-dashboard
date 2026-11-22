@@ -42,18 +42,20 @@ jobs:
         id: gate
         env:
           FORCE: ${{ github.event_name == 'push' || inputs.force }}
+          # backup cron needs >50 min old data so it only covers a missed scheduler slot; other triggers >20 min
+          MAX_AGE_MIN: ${{ github.event_name == 'schedule' && 50 || 20 }}
         run: |
           run=true
           if [ "$FORCE" != true ]; then
-            # Vienna 06:00-19:59 only, and only if the live data is older than 20 min (unreadable live data counts as stale)
+            # Vienna 06:00-19:59 only, and only if the live data is older than MAX_AGE_MIN (unreadable live data counts as stale)
             hour=$(TZ=Europe/Vienna date +%H)
             if [ "$hour" -lt 6 ] || [ "$hour" -ge 20 ]; then
               run=false
             elif curl -fsS --retry 3 "$LIVE/stations.json" -o /tmp/live.json 2>/dev/null; then
               python3 - <<'PY' || run=false
-          import json, datetime as d, sys
+          import json, datetime as d, sys, os
           age = d.datetime.now(d.timezone.utc) - d.datetime.fromisoformat(json.load(open("/tmp/live.json"))["updated"])
-          sys.exit(0 if age > d.timedelta(minutes=20) else 1)
+          sys.exit(0 if age > d.timedelta(minutes=int(os.environ["MAX_AGE_MIN"])) else 1)
           PY
             fi
           fi
