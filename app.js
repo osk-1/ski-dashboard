@@ -857,12 +857,14 @@ async function load() {
     try { res = await Promise.all([get("stations"), get("danger").catch(() => null), get("regions").catch(() => null), get("hourly").catch(() => null), get("health").catch(() => null)]); }
     catch { note.textContent = lastLoad ? `Refresh failed · showing data from ${fmtSlot(state.updated)}` : "Couldn't load station data. Reload the page to try again."; return; } // refresh failures keep old data
     const [st, dg, rg, hr, he] = res;
+    const changed = !lastLoad || st.updated !== state.updated || (!state.hourly && !!hr) || (!state.danger && !!dg) || (!state.regions && !!rg);
     state.danger = dg ?? state.danger; state.regions = rg ?? state.regions; // like hourly: a failed refresh keeps the polygons
     state.stations = st.stations || [];
     state.hourly = hr ?? state.hourly; state.health = he; state.updated = st.updated; // a failed hourly fetch keeps the charts' data
     if (!placed().some(s => s.id === state.selected)) state.selected = placed().map(s => goodOnly(s, Date.now())).sort((a, b) => (b.hs ?? 0) - (a.hs ?? 0))[0]?.id; // a misplaced or saved-but-gone station is never picked; default: deepest good HS
     note.textContent = `Updated ${fmtSlot(st.updated)} · ${state.stations.length} stations${hr ? "" : " · hourly data couldn't be refreshed"}`;
     lastLoad = Date.now();
+    if (!changed) return; // identical data: a rebuild would drop keyboard focus and chart cursors
     if (map) { dangerOk = !!(state.regions && state.danger?.regions); dangerLayer.clearLayers(); if (dangerOk) dangerLayer.addData(state.regions); } // restyle polygons for the new bulletin
     renderAll();
   } catch (e) { console.error(e); note.textContent = "Something went wrong showing the data. Reload the page to try again."; // a render bug is not a load failure

@@ -27,8 +27,10 @@ async function open(browser, vp, scheme, d) {
   page.on("pageerror", (e) => problems.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") problems.push(m.text()); });
   await page.addInitScript(() => { localStorage.setItem("layers", JSON.stringify({ on: { snow: true, wind: true } })); localStorage.setItem("tableOpen", "1"); localStorage.setItem("sel", "SKAP2"); });
+  const hits = { stations: 0 };
   await page.route("**/data/*.json", (route) => {
     const n = new URL(route.request().url()).pathname.match(/(\w+)\.json$/)[1];
+    if (n === "stations") hits.stations++;
     return d[n] ? route.fulfill({ contentType: "application/json", body: JSON.stringify(d[n]) }) : route.fulfill({ status: 404, body: "" });
   });
   await page.route(/^https?:\/\/(?!127\.0\.0\.1|cdnjs\.cloudflare\.com)/, (route) => {
@@ -40,13 +42,13 @@ async function open(browser, vp, scheme, d) {
   await page.clock.install({ time: new Date(d.stations.updated) }); // time flows from the run time; fastForward drives the minute re-check
   await page.goto("/index.html");
   await expect(page.locator("#updated")).toContainText("stations");
-  return { page, context, problems };
+  return { page, context, problems, hits };
 }
 
 for (const vp of VIEWPORTS) {
   for (const scheme of ["light", "dark"]) {
     test(`accuracy cases at ${vp.name}px, ${scheme}`, async ({ browser }, testInfo) => {
-      const { page, context, problems } = await open(browser, vp, scheme, data());
+      const { page, context, problems, hits } = await open(browser, vp, scheme, data());
       const shot = (loc, n) => loc.screenshot({ path: testInfo.outputPath(`${vp.name}-${scheme}-${n}.png`) });
 
       // stale health.json -> banner
@@ -103,7 +105,11 @@ for (const vp of VIEWPORTS) {
       await page.locator('#rows tr[data-id="KDIA2"]').focus();
       await page.clock.fastForward("01:00");
       await expect(page.locator('#rows tr[data-id="KDIA2"]')).toBeFocused();
-      // the minute re-check, no refetch: 3 h later Zürs HS (13:35) is past 6 h and gets struck
+      // past 30 min the minute timer refetches; identical data re-renders nothing, so focus survives
+      await page.clock.fastForward("30:00");
+      await expect.poll(() => hits.stations).toBeGreaterThanOrEqual(2);
+      await expect(page.locator('#rows tr[data-id="KDIA2"]')).toBeFocused();
+      // the minute re-check: 3 h later Zürs HS (13:35) is past 6 h and gets struck
       await page.clock.fastForward("03:01:00");
       await expect(page.locator('#rows tr[data-id="VOR-ZURS1"] td').nth(2).locator("s.bad")).toHaveCount(1);
       await expect(page.locator("#banner")).toBeVisible();
