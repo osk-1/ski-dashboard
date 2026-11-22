@@ -436,6 +436,16 @@ def selftest():
         except OSError:
             pass
         assert uo.call_count == 2, uo.call_count
+    # should_run(): Vienna window 06:00-19:59 (winter, UTC+1), then live-data age vs max_age_min
+    stale = "2026-11-22T00:00:00+00:00"
+    assert not should_run(datetime(2026, 11, 23, 5, 59, tzinfo=TZ), stale, 20)
+    assert not should_run(datetime(2026, 11, 23, 20, 0, tzinfo=TZ), stale, 20)
+    assert should_run(datetime(2026, 11, 23, 6, 0, tzinfo=TZ), None, 20)
+    n = datetime(2026, 11, 23, 19, 59, tzinfo=TZ)
+    assert should_run(n, None, 20)
+    assert not should_run(n, (n - timedelta(minutes=19)).isoformat(), 20)
+    assert should_run(n, (n - timedelta(minutes=21)).isoformat(), 20)
+    assert should_run(n, "garbage", 20)
 
 
 class FetchTests(unittest.TestCase):

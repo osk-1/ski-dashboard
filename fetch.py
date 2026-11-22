@@ -576,6 +576,16 @@ def forecast(stations, fetch=get_json):
     return model, "MET Norway", down, perr
 
 
+def should_run(now, live_updated, max_age_min):
+    """True inside Vienna 06:00-19:59 when the live data is missing, unreadable or older than max_age_min."""
+    if not 6 <= now.astimezone(TZ).hour < 20:
+        return False
+    try:
+        return now - datetime.fromisoformat(live_updated) > timedelta(minutes=max_age_min)
+    except (TypeError, ValueError):  # None, garbage or naive timestamp: treat as stale
+        return True
+
+
 def main():
     now = datetime.now(TZ)
     src = {k: {"ok": True, "error": None, "detail": None} for k in ("tirol", "tawes", "vorarlberg", "model", "bulletins")}  # health.json
@@ -721,4 +731,12 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--gate"]:  # workflow Gate step: prints true/false, never fetches
+        try:
+            with open("/tmp/live.json") as fh:
+                live = json.load(fh)["updated"]
+        except Exception:
+            live = None  # missing or unreadable live data counts as stale
+        print("true" if should_run(datetime.now(timezone.utc), live, int(os.environ["MAX_AGE_MIN"])) else "false")
+        sys.exit(0)
     main()
