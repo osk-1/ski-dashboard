@@ -1162,7 +1162,6 @@ const srcOf = id =>
 const isGauge = id => /^(TAWES|VOR)-/.test(id);
 
 const legend = { labels: { boxWidth: 14, boxHeight: 8, font: { size: 11 } } };
-const hasField = (hours, f, id) => Object.values(hours).some(h => h[f]?.[id] != null);
 const nn = a => a.some(p => p.y != null);
 const NO_HOURLY = "No hourly data: data/hourly.json could not be loaded."; // first load without it; a failed refresh keeps the previous data
 // shaded forecast zone after "now", dashed now line, label naming the model source (clipped to the zone)
@@ -1954,7 +1953,7 @@ async function load() {
   if (loading) return;
   loading = true;
   const get = f =>
-    fetch(`data/${f}.json`, { cache: "no-cache" }).then(r => {
+    fetch(`data/${f}.json`, { cache: "no-cache", signal: AbortSignal.timeout(15000) }).then(r => {
       if (!r.ok) throw new Error(r.status);
       return r.json();
     });

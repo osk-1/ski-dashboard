@@ -246,6 +246,7 @@ const riseOf = (hours, id, from, to) => {
 const extremeOf = (hours, field, id, from, to, max) =>
   okPts(hours, field, id, from, to).reduce((a, p) => (!a || (max ? p.y > a.y : p.y < a.y) ? p : a), null);
 const r1 = v => (v == null ? null : Math.round(v * 10) / 10);
+const hasField = (hours, f, id) => Object.values(hours).some(h => h[f]?.[id] != null);
 // per band: n = stations with any data; each metric is the median over the stations that have it (null when none), with its own station count (…N)
 // and, for snow, the median hours with data (…H) out of the window's hours (of): less than `of` means a partial total. Windows are (now-h, now] and (now, now+h].
 const bandStats = (stations, hours, now, h) => {
@@ -254,7 +255,7 @@ const bandStats = (stations, hours, now, h) => {
     next = [now + 1, now + h * H];
   for (const [b] of BANDS) {
     const st = stations.filter(s => bandOf(s.alt) === b),
-      has = id => Object.values(hours).some(x => x.hs?.[id] != null);
+      has = id => hasField(hours, "hs", id);
     const per = st.map(s => {
       const hs = has(s.id),
         a = hs ? riseOf(hours, s.id, ...past) : { n: 0 },
@@ -339,6 +340,7 @@ if (typeof module !== "undefined")
     sumField,
     riseOf,
     extremeOf,
+    hasField,
     bandStats,
     strongestGust,
     nsKeys,
