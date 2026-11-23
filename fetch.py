@@ -607,6 +607,10 @@ def merge_history(hours, tried, live, stations, by_uuid, now, src, note):
             tried.add(t.strftime(UTC_KEY))
         except Exception as e:
             print("skip hour", t.isoformat(), e, file=sys.stderr)
+            if (
+                isinstance(e, urllib.error.HTTPError) and e.code == 404 and now - t > timedelta(hours=6)
+            ):  # archive never published: stop re-requesting; recent hours may still publish late
+                tried.add(t.strftime(UTC_KEY))
             bad += 1
     if bad:
         note("tirol", f"archive hours failed: {bad}")
@@ -643,7 +647,7 @@ def read_bulletins(ids, src, fail):
     try:  # a bulletin that fails keeps its regions from the last run
         with open("data/danger.json") as fh:
             regions = {k: v for k, v in json.load(fh)["regions"].items() if k in ids}
-    except (FileNotFoundError, KeyError, ValueError):
+    except (FileNotFoundError, KeyError, ValueError, TypeError, AttributeError):  # wrong shape (e.g. regions null) starts fresh too
         regions = {}
     for name, url in BULLETINS.items():  # secondary sources: a failure must not abort the run
         try:

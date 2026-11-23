@@ -18,7 +18,7 @@ export default [
       "prefer-const": "error",
     },
   },
-  { files: ["app.js", "overlay.js"], languageOptions: { globals: Object.fromEntries(["tierOf", "groupByPixel", "describeGroup", "STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "extremeOf", "binSum", "sumField", "slice", "WINDOWS", "winOr", "tickStepH", "risePts", "delta", "latest", "extreme", "refroze", "valueState", "misplaced", "goodOnly", "refreshStale", "staleAfter", "offlineAfter", "bandOf", "BANDS", "median", "compass", "bandStats", "strongestGust", "nsKeys", "nsStep", "lerp"].map((n) => [n, "readonly"])) } }, // from lib.js
+  { files: ["app.js", "overlay.js"], languageOptions: { globals: Object.fromEntries(["tierOf", "groupByPixel", "describeGroup", "STEPS", "band", "hasWind", "arrowOn", "lambert", "esc", "viennaKey", "keyMs", "anchorMs", "extremeOf", "binSum", "sumField", "slice", "WINDOWS", "winOr", "tickStepH", "risePts", "delta", "latest", "extreme", "refroze", "valueState", "misplaced", "goodOnly", "refreshStale", "staleAfter", "offlineAfter", "bandOf", "BANDS", "median", "compass", "hasField", "bandStats", "strongestGust", "nsKeys", "nsStep", "lerp"].map((n) => [n, "readonly"])) } }, // from lib.js
   {
     files: ["**/*.mjs", "**/*.js"],
     ignores: ["app.js", "lib.js", "overlay.js"],

@@ -490,6 +490,91 @@ class FetchTests(unittest.TestCase):
                 pass
             assert uo.call_count == 1, uo.call_count
 
+    def test_read_bulletins(self):
+        # read_bulletins(): last run's regions kept, a bulletin that loads replaces its own region, other failures go to fail
+        euregio = {
+            "bulletins": [
+                {
+                    "publicationTime": "p",
+                    "validTime": {"startTime": "a", "endTime": "new-end"},
+                    "dangerRatings": [
+                        {"mainValue": "low", "elevation": {"upperBound": "2600"}, "validTimePeriod": "all_day"},
+                        {"mainValue": "considerable", "elevation": {"lowerBound": "2600"}, "validTimePeriod": "all_day"},
+                    ],
+                    "avalancheProblems": [{"problemType": "wet_snow", "elevation": {"lowerBound": "2500"}, "aspects": ["S"]}],
+                    "regions": [{"name": "X", "regionID": "AT-07-07"}],
+                }
+            ]
+        }
+        ids = {"AT-07-07", "AT-08-03-01"}
+        old = {"regions": {"AT-07-07": {"valid_end": "old-end"}, "AT-08-03-01": {"valid_end": "kept"}}}
+        euregio_url, vor_url = fetch.BULLETINS["Euregio avalanche.report"], fetch.BULLETINS["LWD Vorarlberg"]
+
+        def run(vor_exc):
+            calls, src = [], {"bulletins": {"ok": True, "error": None, "detail": None}}
+
+            def get(url):
+                if url == euregio_url:
+                    return euregio
+                if url == vor_url:
+                    raise vor_exc
+                raise AssertionError("unexpected url " + url)
+
+            cwd = os.getcwd()
+            with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
+                os.chdir(tmp)
+                try:
+                    os.mkdir("data")
+                    with open("data/danger.json", "w") as fh:
+                        json.dump(old, fh)
+                    with mock.patch.object(fetch, "get_json", get):
+                        regions = fetch.read_bulletins(ids, src, lambda k, e: calls.append((k, str(e))))
+                finally:
+                    os.chdir(cwd)
+            return regions, src, calls
+
+        # (1) Vorarlberg 404 before its first bulletin of the season: old region kept, no failure
+        regions, src, calls = run(urllib.error.HTTPError(vor_url, 404, "nf", None, None))
+        self.assertEqual(sorted(regions), ["AT-07-07", "AT-08-03-01"])
+        self.assertEqual(regions["AT-08-03-01"], {"valid_end": "kept"})
+        self.assertEqual(regions["AT-07-07"]["valid_end"], "new-end")
+        self.assertEqual(src["bulletins"]["detail"], "no bulletin published yet")
+        self.assertEqual(calls, [])
+        # (2) Vorarlberg other failure: reported through fail, its last-run region still kept
+        regions, src, calls = run(OSError("down"))
+        self.assertEqual(regions["AT-08-03-01"], {"valid_end": "kept"})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "bulletins")
+        self.assertIn("LWD Vorarlberg: down", calls[0][1])
+        # (3) danger.json with regions null: no crash, starts fresh
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
+            os.chdir(tmp)
+            try:
+                os.mkdir("data")
+                with open("data/danger.json", "w") as fh:
+                    json.dump({"regions": None}, fh)
+                with mock.patch.object(fetch, "get_json", side_effect=urllib.error.HTTPError(vor_url, 404, "nf", None, None)):
+                    self.assertEqual(fetch.read_bulletins(ids, {"bulletins": {"ok": True, "error": None, "detail": None}}, lambda k, e: None), {})
+            finally:
+                os.chdir(cwd)
+
+    def test_merge_history_404_archive_marked_tried(self):
+        # a Tirol archive hour that 404s is marked tried only when older than 6 hours; recent hours stay retryable
+        now = datetime(2026, 11, 20, 13, 0, tzinfo=timezone.utc)  # whole hour: hour i back from now is exactly i hours old
+
+        def get(url):
+            if "_stations.geojson" in url:
+                raise urllib.error.HTTPError(url, 404, "nf", None, None)
+            raise OSError("down: " + url)  # TAWES history
+
+        src = {"tawes": {"ok": True, "error": None, "detail": None}}
+        tried = set()
+        with contextlib.redirect_stderr(io.StringIO()), mock.patch.object(fetch, "get_json", get):
+            fetch.merge_history({}, tried, [], [], {}, now, src, lambda k, m: None)
+        expected = {(now - timedelta(hours=i)).strftime(UTC_KEY) for i in range(7, 49)}  # newest 48 hours tried, ages 1-6 h left out
+        self.assertEqual(tried, expected)
+
     def test_should_run(self):
         # should_run(): Vienna window 06:00-19:59 (winter, UTC+1), then live-data age vs max_age_min
         stale = "2026-11-22T00:00:00+00:00"
