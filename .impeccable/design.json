@@ -1,0 +1,465 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T09:27:49.042399Z",
+  "title": "Design System: Arlberg Snow Depth",
+  "extensions": {
+    "colorMeta": {
+      "sky-paper": {
+        "role": "neutral",
+        "displayName": "Sky Paper",
+        "canonical": "#f4f7fa",
+        "darkValue": "#0e151d",
+        "tonalRamp": [
+          "#0a1018",
+          "#4d5259",
+          "#909499",
+          "#d3d6da",
+          "#f5f8fb",
+          "#f6f9fc",
+          "#f8fafd",
+          "#f9fcfe"
+        ]
+      },
+      "panel-white": {
+        "role": "neutral",
+        "displayName": "Panel White",
+        "canonical": "#ffffff",
+        "darkValue": "#16202b",
+        "tonalRamp": [
+          "#0a1018",
+          "#50545a",
+          "#96999c",
+          "#dcddde",
+          "#feffff",
+          "#fdfeff",
+          "#fcfdff",
+          "#fafcff"
+        ]
+      },
+      "ink-navy": {
+        "role": "neutral",
+        "displayName": "Ink Navy",
+        "canonical": "#142030",
+        "darkValue": "#e5edf5",
+        "tonalRamp": [
+          "#0a1018",
+          "#0d151f",
+          "#101926",
+          "#131e2d",
+          "#323c4b",
+          "#6d7580",
+          "#a8adb5",
+          "#e3e6ea"
+        ]
+      },
+      "muted-slate": {
+        "role": "neutral",
+        "displayName": "Muted Slate",
+        "canonical": "#5b6b7d",
+        "darkValue": "#93a3b5",
+        "tonalRamp": [
+          "#0a1018",
+          "#212a35",
+          "#384452",
+          "#4f5e6f",
+          "#6f7e8e",
+          "#98a3af",
+          "#c1c8d1",
+          "#eaeef2"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#d8e0e8",
+        "darkValue": "#2a3644",
+        "tonalRamp": [
+          "#0a1018",
+          "#454b53",
+          "#80878f",
+          "#bbc2ca",
+          "#dce4eb",
+          "#e5ebf1",
+          "#eef2f7",
+          "#f7f9fd"
+        ]
+      },
+      "barometer-blue": {
+        "role": "primary",
+        "displayName": "Barometer Blue",
+        "canonical": "#1d5fc4",
+        "darkValue": "#6fa3ec",
+        "tonalRamp": [
+          "#0a1018",
+          "#0f2749",
+          "#153d7a",
+          "#1a54ab",
+          "#3973cc",
+          "#729cdb",
+          "#abc4ea",
+          "#e4ecf9"
+        ]
+      },
+      "barometer-tint": {
+        "role": "primary",
+        "displayName": "Barometer Tint",
+        "canonical": "#dbe7f8",
+        "darkValue": "#1d3150",
+        "tonalRamp": [
+          "#0a1018",
+          "#464d58",
+          "#818b98",
+          "#bdc8d8",
+          "#dfeaf9",
+          "#e7effb",
+          "#eff4fc",
+          "#f7fafe"
+        ]
+      },
+      "valley-grey": {
+        "role": "neutral",
+        "displayName": "Valley Grey",
+        "canonical": "#e9eef3",
+        "darkValue": "#1a2531",
+        "tonalRamp": [
+          "#0a1018",
+          "#4a4f57",
+          "#898f95",
+          "#c9ced4",
+          "#ebf0f5",
+          "#f0f3f8",
+          "#f4f7fb",
+          "#f8fbfe"
+        ]
+      },
+      "village-brown": {
+        "role": "tertiary",
+        "displayName": "Village Brown",
+        "canonical": "#8a6a3c",
+        "darkValue": "#c9a873",
+        "tonalRamp": [
+          "#0a1018",
+          "#2f2a22",
+          "#53432d",
+          "#785d37",
+          "#987d55",
+          "#b5a287",
+          "#d2c8b9",
+          "#efedec"
+        ]
+      },
+      "wind-ember": {
+        "role": "secondary",
+        "displayName": "Wind Ember",
+        "canonical": "#c0561a",
+        "darkValue": "#f0a060",
+        "tonalRamp": [
+          "#0a1018",
+          "#3e2419",
+          "#723819",
+          "#a64c1a",
+          "#c76b37",
+          "#d69672",
+          "#e5c1ad",
+          "#f4ebe8"
+        ]
+      },
+      "snow-0": {
+        "role": "snow",
+        "displayName": "Snow 0",
+        "canonical": "#e6eef8",
+        "darkValue": "#22344a",
+        "tonalRamp": [
+          "#0a1018",
+          "#494f58",
+          "#888f98",
+          "#c7ced8",
+          "#e9f0f9",
+          "#eef3fb",
+          "#f3f7fc",
+          "#f8fbfe"
+        ]
+      },
+      "snow-1": {
+        "role": "snow",
+        "displayName": "Snow 1",
+        "canonical": "#b9d0ee",
+        "darkValue": "#2f5786",
+        "tonalRamp": [
+          "#0a1018",
+          "#3c4755",
+          "#6e7e92",
+          "#a0b5cf",
+          "#c1d6f0",
+          "#d2e1f5",
+          "#e3ecf9",
+          "#f4f8fd"
+        ]
+      },
+      "snow-2": {
+        "role": "snow",
+        "displayName": "Snow 2",
+        "canonical": "#7fa9de",
+        "darkValue": "#4a7fc0",
+        "tonalRamp": [
+          "#0a1018",
+          "#2b3c51",
+          "#4d6789",
+          "#6e93c2",
+          "#8fb4e2",
+          "#aec9eb",
+          "#cedef3",
+          "#eef4fc"
+        ]
+      },
+      "snow-3": {
+        "role": "snow",
+        "displayName": "Snow 3",
+        "canonical": "#3f7cc8",
+        "darkValue": "#7eaaea",
+        "tonalRamp": [
+          "#0a1018",
+          "#192f4a",
+          "#284e7d",
+          "#376daf",
+          "#578ccf",
+          "#87addd",
+          "#b7ceeb",
+          "#e7effa"
+        ]
+      },
+      "snow-4": {
+        "role": "snow",
+        "displayName": "Snow 4",
+        "canonical": "#1a4f9c",
+        "darkValue": "#c3dafa",
+        "tonalRamp": [
+          "#0a1018",
+          "#0f223e",
+          "#133463",
+          "#184689",
+          "#3765a9",
+          "#7092c2",
+          "#aabedc",
+          "#e4ebf5"
+        ]
+      },
+      "danger-1": {
+        "role": "danger",
+        "displayName": "Danger 1",
+        "canonical": "#ccff66",
+        "tonalRamp": [
+          "#0a1018",
+          "#41542e",
+          "#799945",
+          "#b0dd5b",
+          "#d2ff7a",
+          "#defea1",
+          "#eafdc8",
+          "#f5fcf0"
+        ]
+      },
+      "danger-2": {
+        "role": "danger",
+        "displayName": "Danger 2",
+        "canonical": "#ffff00",
+        "tonalRamp": [
+          "#0a1018",
+          "#505411",
+          "#96990a",
+          "#dcdd03",
+          "#feff21",
+          "#fdfe62",
+          "#fcfda4",
+          "#fafce6"
+        ]
+      },
+      "danger-3": {
+        "role": "danger",
+        "displayName": "Danger 3",
+        "canonical": "#ff9900",
+        "tonalRamp": [
+          "#0a1018",
+          "#503711",
+          "#965e0a",
+          "#dc8503",
+          "#fea621",
+          "#fdbf62",
+          "#fcd9a4",
+          "#faf2e6"
+        ]
+      },
+      "danger-4": {
+        "role": "danger",
+        "displayName": "Danger 4",
+        "canonical": "#ff0000",
+        "tonalRamp": [
+          "#0a1018",
+          "#500b11",
+          "#96070a",
+          "#dc0203",
+          "#fe2021",
+          "#fd6162",
+          "#fca2a4",
+          "#fae3e6"
+        ]
+      },
+      "danger-5": {
+        "role": "danger",
+        "displayName": "Danger 5",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0a1018",
+          "#070b11",
+          "#04070a",
+          "#010203",
+          "#202021",
+          "#606162",
+          "#a1a2a4",
+          "#e1e3e6"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page name on desktop; hidden on phones."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Uppercase panel titles."
+      },
+      "stat": {
+        "displayName": "Stat",
+        "purpose": "Big tabular readings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Text, table cells, controls."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Table headers, field labels, stat captions."
+      }
+    },
+    "shadows": [
+      {
+        "name": "sheet-lift",
+        "value": "0 -4px 16px rgb(0 0 0 / .18)",
+        "purpose": "Top edge of the phone bottom sheet over the map. The only shadow in the system."
+      }
+    ],
+    "motion": [],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "820px"
+      },
+      {
+        "name": "landscape-phone-height",
+        "value": "500px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented-button",
+      "description": "24 h / 72 h / 7 d switch; selected segment fills with the accent.",
+      "html": "<div class=\"ds-seg\"><button>24h</button><button aria-pressed=\"true\">72h</button><button>7d</button></div>",
+      "css": ".ds-seg{display:flex;max-width:420px;border:1px solid #d8e0e8;border-radius:8px;overflow:hidden;font-family:Barlow,system-ui,sans-serif}.ds-seg button{flex:1;min-height:34px;padding:0 12px;font:600 .85rem/1 Barlow,system-ui,sans-serif;color:#5b6b7d;background:#f4f7fa;border:0;border-left:1px solid #d8e0e8;cursor:pointer}.ds-seg button:first-child{border-left:0}.ds-seg button[aria-pressed=true]{color:#fff;background:#1d5fc4}.ds-seg button:focus-visible{outline:2px solid #1d5fc4;outline-offset:-2px}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat white panel with a hairline border and uppercase condensed title.",
+      "html": "<section class=\"ds-panel\"><h2>Snow height</h2><p>Updated 20 Nov, 16:35 \u00b7 29 stations</p></section>",
+      "css": ".ds-panel{background:#fff;color:#142030;border:1px solid #d8e0e8;border-radius:10px;padding:16px;font:15px/1.5 Barlow,system-ui,sans-serif}.ds-panel h2{font:600 1.15rem/1.2 'Barlow Condensed',Arial Narrow,sans-serif;letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px}.ds-panel p{margin:0;color:#5b6b7d;font-size:.85rem}"
+    },
+    {
+      "name": "Stat",
+      "kind": "custom",
+      "refersTo": "typography.stat",
+      "description": "Condensed tabular number over a small uppercase caption.",
+      "html": "<div class=\"ds-stat\"><b>-3 \u00b0C</b><span>Galzig now \u00b7 16:30</span></div>",
+      "css": ".ds-stat b{display:block;font:600 1.7rem/1 'Barlow Condensed',Arial Narrow,sans-serif;font-variant-numeric:tabular-nums;color:#142030}.ds-stat span{color:#5b6b7d;font:.8rem Barlow,system-ui,sans-serif;text-transform:uppercase;letter-spacing:.06em}"
+    },
+    {
+      "name": "Select",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "Station picker.",
+      "html": "<select class=\"ds-select\"><option>Kapall Schneestation</option></select>",
+      "css": ".ds-select{font:inherit;font-family:Barlow,system-ui,sans-serif;color:#142030;background:#f4f7fa;border:1px solid #d8e0e8;border-radius:6px;padding:4px 6px}.ds-select:focus-visible{outline:2px solid #1d5fc4;outline-offset:1px}"
+    },
+    {
+      "name": "Danger Chip",
+      "kind": "chip",
+      "refersTo": "danger-chip",
+      "description": "Avalanche level in its fixed EAWS colour.",
+      "html": "<span class=\"ds-dg\">3 considerable</span>",
+      "css": ".ds-dg{display:inline-block;padding:0 8px;border-radius:10px;font:600 .85rem/1.5 Barlow,system-ui,sans-serif;background:#ff9900;color:#142030;white-space:nowrap}"
+    },
+    {
+      "name": "Table Row (selected)",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "Selected station row with tint and inset accent edge; stale value struck through.",
+      "html": "<table class=\"ds-t\"><tr class=\"sel\"><td>Kapall Schneestation<br><small>2098 m</small></td><td><b>35</b></td></tr><tr class=\"old\"><td>Ulmerh\u00fctte<br><small>2205 m \u00b7 stale</small></td><td><s>53</s></td></tr></table>",
+      "css": ".ds-t{width:100%;border-collapse:collapse;font:15px Barlow,system-ui,sans-serif;font-variant-numeric:tabular-nums;color:#142030}.ds-t td{padding:8px 6px;border-bottom:1px solid #d8e0e8}.ds-t td:last-child{text-align:right}.ds-t small{color:#5b6b7d;font-size:.75rem}.ds-t .sel{background:#dbe7f8;box-shadow:inset 3px 0 0 #1d5fc4}.ds-t .old td{color:#5b6b7d}.ds-t s{font-weight:400}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Barometer",
+    "overview": "The interface is an instrument you glance at, not a site you browse. A cool blue-grey field, one blue accent, and condensed Barlow numerals let the map and the readings carry everything. Chrome recedes: panels are paper-white on a pale sky ground, separated by hairlines, with no decoration that is not data.",
+    "keyCharacteristics": [
+      "Flat, tonal, hairline-bordered surfaces; one lifted layer (the phone sheet).",
+      "One accent (barometer blue) used for selection, focus and links, never for decoration.",
+      "Condensed display face for headings and big numbers; humanist sans for everything else.",
+      "Snow depth is a five-step blue ramp; wind is a single ember orange; avalanche danger uses the fixed EAWS colours.",
+      "Every reading carries its age, source or trust state."
+    ],
+    "rules": [
+      {
+        "name": "The One Voice Rule",
+        "body": "Barometer Blue marks what is selected or interactive. It is never used for decoration, and a second accent hue is not added.",
+        "section": "colors"
+      },
+      {
+        "name": "The Measured-First Rule",
+        "body": "Measured series are solid; model series are dashed and labelled with their source. Suspect values fade and carry a reason; they are never recoloured to alarm.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Numerals Rule",
+        "body": "Anything numeric that may change or align in a column uses tabular figures.",
+        "section": "typography"
+      },
+      {
+        "name": "The Small-Print Age Rule",
+        "body": "Timestamps, sources and trust notes are 0.72 to 0.8rem muted text next to the value, never a separate block.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces stay flat at rest. A shadow appears only where a layer genuinely floats above the map.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep surfaces flat with 1px Hairline borders; use Barometer Tint for selection.",
+      "Do show age, source or trust beside every reading in 0.72 to 0.8rem muted text.",
+      "Do use tabular figures for all aligned numbers and Barlow Condensed for large readings.",
+      "Do keep touch targets at 44px on phones and a visible 2px accent focus outline.",
+      "Do keep model data dashed and labelled with its source; keep the snow ramp inverted in dark mode."
+    ],
+    "donts": [
+      "Don't add card shadows, gradients, glass or decorative imagery; depth is tonal.",
+      "Don't introduce a second accent colour or use blue for non-interactive decoration.",
+      "Don't theme or restyle the EAWS danger colours.",
+      "Don't hide or recolour suspect data to alarm; fade it and give the reason."
+    ]
+  }
+}
