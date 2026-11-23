@@ -826,7 +826,7 @@ function renderMap() {
       : wo
         ? s.wg == null
           ? "–"
-          : Math.round(s.wg) + " km/h"
+          : Math.round(s.wg) + " km/h" + (s.lt == null || s.bad.lt ? "" : ` · ${Math.round(s.lt)}°`)
         : s.hs == null
           ? "–"
           : Math.round(s.hs) + " cm";
