@@ -1189,6 +1189,7 @@ const forecastZone = (now, label) => ({
     ctx.fillStyle = muted;
     ctx.font = `11px ${css("--body")}`;
     let t = label;
+    if (ctx.measureText(t).width > a.right - px - 8) t = label.replace(/^forecast · /, ""); // narrow zone: keep the source, drop the generic word
     while (t.length > 3 && ctx.measureText(t).width > a.right - px - 8) t = t.slice(0, -2).trimEnd() + "…";
     if (label && a.right - px > 24) ctx.fillText(t, px + 4, a.top + 11);
     if (px - a.left > 34) {
